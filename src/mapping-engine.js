@@ -282,6 +282,7 @@ export class MappingEngine {
     // Boundary rebasing: if the raw position was clamped to a screen edge,
     // shift the anchor so continued relative movement in the same direction
     // continues from the opposite side, enabling unbounded camera control.
+    // Also reset mouseDelta so relative movement starts fresh from the new anchor.
     const hitLeft = rawX < 0;
     const hitRight = rawX > this.screen.width - 1;
     const hitTop = rawY < 0;
@@ -303,6 +304,10 @@ export class MappingEngine {
       // Moved past bottom edge — shift anchor up to allow continued downward movement
       this.mouseAnchor.y = Math.max(0.0, this.mouseAnchor.y - 0.1);
     }
+
+    // Reset accumulated delta after boundary rebasing so relative movement
+    // continues correctly from the new anchor position
+    this.mouseDelta = { x: 0, y: 0 };
 
     // Use clamped position for pointer (guaranteed within screen bounds)
     const cx = xClamped;

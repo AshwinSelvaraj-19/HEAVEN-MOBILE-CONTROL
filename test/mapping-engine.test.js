@@ -58,6 +58,33 @@ test('WASD key-up releases persistent joystick pointer when last key released', 
   assert.equal(pointers.snapshot().count, 0, 'no pointers should remain active');
 });
 
+
+test('W key up while A remains moves joystick from northwest to left', () => {
+  const { pointers, engine } = makeEngine();
+  engine.keyDown('w');
+  engine.keyDown('a');
+  // Position should be northwest (x < center, y < center)
+  const snapWA = pointers.snapshot();
+  const posWA = snapWA.active[0];
+  assert.ok(posWA.x < SCREEN.width / 2, 'W+A: x should be left of center');
+  assert.ok(posWA.y < SCREEN.height / 2, 'W+A: y should be above center (northwest)');
+
+  // Now release W while A remains down
+  engine.keyUp('w');
+  // Joystick should now move from northwest toward left (x still < center, y should move toward center)
+  const snapAfterWUp = pointers.snapshot();
+  const posAfterWUp = snapAfterWUp.active[0];
+  assert.ok(posAfterWUp.x < SCREEN.width / 2, 'After W up with A still down: x should still be left of center');
+  // y should be closer to center than before (A only moves left, no forward component)
+  assert.ok(posAfterWUp.y >= posWA.y && posAfterWUp.y <= SCREEN.height / 2,
+    `After W up with A still down: y should move toward center, was ${posWA.y}, now ${posAfterWUp.y}`);
+
+  // Now release A — pointer should be released since no movement keys remain
+  engine.keyUp('a');
+  assert.ok(!engine.joystickPointerDown, 'pointer should be released after last key up');
+  assert.equal(pointers.snapshot().count, 0, 'no pointers should remain active');
+});
+
 test('combined movement keys produce correct directional vector', () => {
   const { pointers, engine } = makeEngine();
   engine.keyDown('w');
@@ -93,6 +120,31 @@ test('diagonal normalization preserves consistent speed', () => {
   // just verify diagonal is not faster.
   const magDiff = diagMag - cardinalMag;
   assert.ok(magDiff <= 1, `diagonal speed should not exceed cardinal speed; diff=${magDiff}`);
+});
+
+test('quantitative diagonal vs cardinal screen-space displacement', () => {
+  const { pointers, engine } = makeEngine();
+  // Press W only (cardinal on 1080x2340 screen)
+  engine.keyDown('w');
+  const posW = pointers.snapshot().active[0];
+  const wx = posW.x - SCREEN.width / 2;
+  const wy = posW.y - SCREEN.height / 2;
+  const cardinalMag = Math.hypot(wx, wy);
+
+  // Press W + D (diagonal)
+  engine.keyDown('d');
+  const posDiag = pointers.snapshot().active[0];
+  const dx = posDiag.x - SCREEN.width / 2;
+  const dy = posDiag.y - SCREEN.height / 2;
+  const diagMag = Math.hypot(dx, dy);
+
+  // Diagonal should not exceed cardinal speed
+  const speedRatio = diagMag / Math.max(cardinalMag, 0.01);
+  assert.ok(speedRatio <= 1.5, `diagonal speed ratio ${speedRatio.toFixed(2)} should not exceed cardinal by more than 50%`);
+
+  // Verify cardinal and diagonal both move meaningful distance from center
+  assert.ok(cardinalMag > 5, `cardinal move should be meaningful, mag=${cardinalMag}`);
+  assert.ok(diagMag > 5, `diagonal move should be meaningful, mag=${diagMag}`);
 });
 
 test('opposing movement keys cancel each other (W+S, A+D)', () => {
@@ -215,6 +267,35 @@ test('timer and event cleanup after emergency release', () => {
   assert.equal(engine._cleanupTimers.size, 0, 'timer map should be cleared after emergency release');
 });
 
+
+
+test('regression: W down, A down, W up moves from northwest to left, A up releases pointer', () => {
+  const { pointers, engine } = makeEngine();
+  // W down
+  engine.keyDown('w');
+  // A down
+  engine.keyDown('a');
+  // Position should be northwest
+  const snapWA = pointers.snapshot();
+  const posWA = snapWA.active[0];
+  assert.ok(posWA.x < SCREEN.width / 2, 'W+A: x should be left of center (northwest)');
+  assert.ok(posWA.y < SCREEN.height / 2, 'W+A: y should be above center (northwest)');
+
+  // W up while A remains
+  engine.keyUp('w');
+  // Pointer should move from northwest toward left (x still < center)
+  const snapAfterWUp = pointers.snapshot();
+  const posAfterWUp = snapAfterWUp.active[0];
+  assert.ok(posAfterWUp.x < SCREEN.width / 2, 'After W up with A still down: x should still be left of center');
+  // y should move toward center (may reach center)
+  assert.ok(posAfterWUp.y >= posWA.y && posAfterWUp.y <= SCREEN.height / 2,
+    'After W up with A still down: y should move toward center');
+
+  // A up - should release pointer
+  engine.keyUp('a');
+  assert.ok(!engine.joystickPointerDown, 'pointer should be released after A up');
+  assert.equal(pointers.snapshot().count, 0, 'no pointers should remain active');
+});
 test('disconnect behavior — emergency release does not throw when session lost', () => {
   const { pointers, engine } = makeEngine();
   // Simulate a lost session by clearing the channel
