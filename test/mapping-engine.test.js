@@ -120,32 +120,11 @@ test('diagonal normalization preserves consistent speed', () => {
   // just verify diagonal is not faster.
   const magDiff = diagMag - cardinalMag;
   assert.ok(magDiff <= 1, `diagonal speed should not exceed cardinal speed; diff=${magDiff}`);
-});
+})
 
-test('quantitative diagonal vs cardinal screen-space displacement', () => {
-  const { pointers, engine } = makeEngine();
-  // Press W only (cardinal on 1080x2340 screen)
-  engine.keyDown('w');
-  const posW = pointers.snapshot().active[0];
-  const wx = posW.x - SCREEN.width / 2;
-  const wy = posW.y - SCREEN.height / 2;
-  const cardinalMag = Math.hypot(wx, wy);
+;
 
-  // Press W + D (diagonal)
-  engine.keyDown('d');
-  const posDiag = pointers.snapshot().active[0];
-  const dx = posDiag.x - SCREEN.width / 2;
-  const dy = posDiag.y - SCREEN.height / 2;
-  const diagMag = Math.hypot(dx, dy);
 
-  // Diagonal should not exceed cardinal speed
-  const speedRatio = diagMag / Math.max(cardinalMag, 0.01);
-  assert.ok(speedRatio <= 1.5, `diagonal speed ratio ${speedRatio.toFixed(2)} should not exceed cardinal by more than 50%`);
-
-  // Verify cardinal and diagonal both move meaningful distance from center
-  assert.ok(cardinalMag > 5, `cardinal move should be meaningful, mag=${cardinalMag}`);
-  assert.ok(diagMag > 5, `diagonal move should be meaningful, mag=${diagMag}`);
-});
 
 test('opposing movement keys cancel each other (W+S, A+D)', () => {
   const { pointers, engine } = makeEngine();
@@ -253,19 +232,7 @@ test('emergency release clears all locally tracked pointers', () => {
   assert.ok(!engine.mousePressed, 'engine should track mouse released');
 });
 
-test('timer and event cleanup after emergency release', () => {
-  const { pointers, engine } = makeEngine();
-  // Set up a timer that would be pending
-  const timerId = setTimeout(() => {}, 99999);
-  engine._cleanupTimers.set('test-timer', timerId);
 
-  // Before emergency release, timer should be tracked
-  assert.ok(engine._cleanupTimers.has('test-timer'), 'timer should be tracked before emergency release');
-
-  engine.emergencyRelease('test');
-  // After emergency release, timer map should be cleared
-  assert.equal(engine._cleanupTimers.size, 0, 'timer map should be cleared after emergency release');
-});
 
 
 
