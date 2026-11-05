@@ -1,0 +1,8 @@
+# runtime logs (artifacts/ is kept: it is the hardware evidence)
+logs/
+
+# scratch
+.tmp/
+.research/
+
+node_modules/

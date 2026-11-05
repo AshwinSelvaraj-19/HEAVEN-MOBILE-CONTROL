@@ -1,0 +1,21 @@
+{
+  "name": "heaven-mobile-control-poc",
+  "version": "0.2.0-poc",
+  "private": true,
+  "description": "Phase 2 proof of concept: multi-touch injection over USB ADB using a control-only scrcpy 4.1 server session (no root, no Shizuku, no Wi-Fi).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "doctor": "node src/main.js --dry-run",
+    "selftest": "node src/main.js --selftest",
+    "proof": "node src/main.js --proof",
+    "hold": "node src/main.js --proof --keep-held 8000",
+    "test": "node --test",
+    "check": "node --check src/main.js && node --check src/ui-server.js && node --check src/ui-page.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

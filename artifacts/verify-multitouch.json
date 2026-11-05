@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "steps": [
+    "opened the probe page on the device",
+    "control-only scrcpy session started",
+    "two pointers down; screenshot taken",
+    "pointer B swept while pointer A stayed down; screenshot taken",
+    "both pointers still held after the sweep; screenshot taken",
+    "both pointers released; screenshot taken"
+  ],
+  "screenshots": [
+    "C:\\Users\\ashwi\\Desktop\\HEAVEN-MOBILE-CONTROL\\artifacts\\verify-0-before.png",
+    "C:\\Users\\ashwi\\Desktop\\HEAVEN-MOBILE-CONTROL\\artifacts\\verify-1-two-pointers-hold.png",
+    "C:\\Users\\ashwi\\Desktop\\HEAVEN-MOBILE-CONTROL\\artifacts\\verify-2-swept-with-a-held.png",
+    "C:\\Users\\ashwi\\Desktop\\HEAVEN-MOBILE-CONTROL\\artifacts\\verify-3-still-held.png",
+    "C:\\Users\\ashwi\\Desktop\\HEAVEN-MOBILE-CONTROL\\artifacts\\verify-4-released.png"
+  ],
+  "sweep": {
+    "sent": 300,
+    "requestedHz": 120,
+    "achievedHz": 120,
+    "p95IntervalMs": 10,
+    "maxIntervalMs": 11,
+    "durationMs": 2500
+  }
+}
