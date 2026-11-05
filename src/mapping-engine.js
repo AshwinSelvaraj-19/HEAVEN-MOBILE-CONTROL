@@ -114,9 +114,15 @@ export class MappingEngine {
     }
     this.keyState[key] = false;
 
-    if (this._isMovementKey(key) && this._noMovementKeysDown()) {
-      this._releaseJoystickPointer();
-      this.wasdPressed = false;
+    if (this._isMovementKey(key)) {
+      if (this._noMovementKeysDown()) {
+        // Last movement key released — release the joystick pointer
+        this._releaseJoystickPointer();
+        this.wasdPressed = false;
+      } else {
+        // Other movement keys still down — update direction
+        this._updateJoystickDirection();
+      }
     }
   }
 
@@ -261,19 +267,50 @@ export class MappingEngine {
     const sx = this.mouseDelta.x * this.mouseSensitivity;
     const sy = this.mouseDelta.y * this.mouseSensitivity;
 
-    // Calculate position relative to the configured anchor
+    // Calculate raw position relative to the configured anchor
     const ax = this.mouseAnchor.x * this.screen.width;
     const ay = this.mouseAnchor.y * this.screen.height;
-    const x = ax + sx;
-    const y = ay + sy;
+    let x = ax + sx;
+    let y = ay + sy;
 
-    // Clamp to screen boundaries
-    const cx = Math.max(0, Math.min(this.screen.width - 1, Math.round(x)));
-    const cy = Math.max(0, Math.min(this.screen.height - 1, Math.round(y)));
+    // Clamp to screen boundaries and detect edge hits
+    const rawX = Math.round(x);
+    const rawY = Math.round(y);
+    const xClamped = Math.max(0, Math.min(this.screen.width - 1, rawX));
+    const yClamped = Math.max(0, Math.min(this.screen.height - 1, rawY));
+
+    // Boundary rebasing: if the raw position was clamped to a screen edge,
+    // shift the anchor so continued relative movement in the same direction
+    // continues from the opposite side, enabling unbounded camera control.
+    const hitLeft = rawX < 0;
+    const hitRight = rawX > this.screen.width - 1;
+    const hitTop = rawY < 0;
+    const hitBottom = rawY > this.screen.height - 1;
+
+    if (hitLeft) {
+      // Moved past left edge — shift anchor right to allow continued leftward movement
+      this.mouseAnchor.x = Math.min(1.0, this.mouseAnchor.x + 0.1);
+    }
+    if (hitRight) {
+      // Moved past right edge — shift anchor left to allow continued rightward movement
+      this.mouseAnchor.x = Math.max(0.0, this.mouseAnchor.x - 0.1);
+    }
+    if (hitTop) {
+      // Moved past top edge — shift anchor down to allow continued upward movement
+      this.mouseAnchor.y = Math.min(1.0, this.mouseAnchor.y + 0.1);
+    }
+    if (hitBottom) {
+      // Moved past bottom edge — shift anchor up to allow continued downward movement
+      this.mouseAnchor.y = Math.max(0.0, this.mouseAnchor.y - 0.1);
+    }
+
+    // Use clamped position for pointer (guaranteed within screen bounds)
+    const cx = xClamped;
+    const cy = yClamped;
 
     // Delegate to PointerManager — it owns pointer lifecycle.
     if (this.cameraPointerDown) {
-      this.pm.move('camera', cx, cy);
+      this.pm.move("camera", cx, cy);
     }
   }
 
@@ -380,6 +417,11 @@ export class MappingEngine {
     this.cameraPointerDown = false;
     this.mousePressed = false;
     this.mouseDelta = { x: 0, y: 0 };
+    // Reset all four movement key states
+    this.keyState.w = false;
+    this.keyState.a = false;
+    this.keyState.s = false;
+    this.keyState.d = false;
 
     // Clear any pending timers
     this._clearAllTimers();
