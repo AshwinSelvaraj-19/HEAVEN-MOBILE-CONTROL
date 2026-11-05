@@ -96,7 +96,7 @@ test('combined movement keys produce correct directional vector', () => {
   const pos = snap.active[0];
   // Position x should be less than center (moving left), y should be less (moving up/forward)
   assert.ok(pos.x < 1080 / 2, `x should be left of center, got ${pos.x}`);
-  assert.ok(pos.y > 0, `y should have some forward component, got ${pos.y}`);
+  assert.ok(pos.y < SCREEN.height / 2, `y should be above center (northwest), got ${pos.y}`);
 });
 
 test('diagonal normalization preserves consistent speed', () => {

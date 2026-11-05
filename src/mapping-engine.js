@@ -74,9 +74,7 @@ export class MappingEngine {
     };
     this.mousePressed = false;          // true when mouse button held for camera
     this.cameraPointerDown = false;     // tracks if PointerManager has 'camera' pointer down
-
-    // ---- Timers / event state cleanup ----
-    this._cleanupTimers = new Map(); // name -> timeoutId
+  
   }
 
   /** -------------------------------------------------------------
@@ -429,15 +427,9 @@ export class MappingEngine {
     this.keyState.d = false;
 
     // Clear any pending timers
-    this._clearAllTimers();
+
   }
 
-  _clearAllTimers() {
-    this._cleanupTimers.forEach((id, name) => {
-      clearTimeout(id);
-    });
-    this._cleanupTimers.clear();
-  }
 
   /** -------------------------------------------------------------
    *  UTILITY: logger sink (minimal, no external deps)
