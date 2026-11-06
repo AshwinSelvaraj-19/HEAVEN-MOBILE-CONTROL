@@ -333,13 +333,14 @@ test('diagonal normalization preserves consistent speed relative to cardinal (qu
   // Math.hypot(dx / rx, dy / ry) ensures diagonal speed does not exceed cardinal.
   const diagMag = Math.hypot(dx / rx, dy / ry);
 
-  // The diagonal must not exceed cardinal by more than the aspect-ratio factor.
-  // With rx=0.3*width, ry=0.3*height on a 1080x2340 screen, diagonal should
-  // not be significantly faster than cardinal after normalization.
+  // Both magnitudes should be approximately 1.0 after hypot normalization.
+  // Without the engine's Math.hypot(dirX, dirY) normalization, the diagonal
+  // magnitude would be ~1.414 times the cardinal, which this strict check rejects.
+  const cardinalIsOne = cardinalMag > 0.8 && cardinalMag < 1.2;
+  const diagIsOne = diagMag > 0.8 && diagMag < 1.2;
+  assert.ok(cardinalIsOne, `cardinal magnitude should be ~1.0 after normalization, got ${cardinalMag.toFixed(2)}`);
+  assert.ok(diagIsOne, `diagonal magnitude should be ~1.0 after normalization, got ${diagMag.toFixed(2)}`);
+  // Also verify the ratio is close to 1.0 (not the natural 1.414 without normalization)
   const speedRatio = diagMag / cardinalMag;
-  assert.ok(speedRatio <= 1.5, `diagonal speed ratio ${speedRatio.toFixed(2)} should not exceed cardinal by more than 50%`);
-
-  // Both should move the pointer a meaningful distance from center
-  assert.ok(cardinalMag > 0.1, `cardinal move should have non-zero magnitude, mag=${cardinalMag}`);
-  assert.ok(diagMag > 0.1, `diagonal move should have non-zero magnitude, mag=${diagMag}`);
+  assert.ok(speedRatio < 1.1, `diagonal speed ratio should be close to 1.0 after normalization, got ${speedRatio.toFixed(2)}`);
 });

@@ -305,8 +305,9 @@ export class MappingEngine {
 
     // Reset accumulated delta after boundary rebasing so relative movement
     // continues correctly from the new anchor position
-    this.mouseDelta = { x: 0, y: 0 };
-
+    if (hitLeft || hitRight || hitTop || hitBottom) {
+      this.mouseDelta = { x: 0, y: 0 };
+    }
     // Use clamped position for pointer (guaranteed within screen bounds)
     const cx = xClamped;
     const cy = yClamped;
