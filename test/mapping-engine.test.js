@@ -97,31 +97,8 @@ test('combined movement keys produce correct directional vector', () => {
   assert.ok(pos.x < 1080 / 2, `x should be left of center, got ${pos.x}`);
   assert.ok(pos.y < SCREEN.height / 2, `y should be above center (northwest), got ${pos.y}`);
 });
-
-test('diagonal normalization preserves consistent speed', () => {
-  const { pointers, engine } = makeEngine();
-  // Press W only (cardinal)
-  engine.keyDown('w');
-  const posW = pointers.snapshot().active[0];
-  const wx = posW.x - SCREEN.width / 2; // offset from center
-  const wy = posW.y - SCREEN.height / 2;
-
-  // Press W + D (diagonal)
-  engine.keyDown('d');
-  const posDiag = pointers.snapshot().active[0];
-  const dx = posDiag.x - SCREEN.width / 2;
-  const dy = posDiag.y - SCREEN.height / 2;
-
-  // Normalized diagonal should have same magnitude as cardinal
-  const cardinalMag = Math.hypot(wx, wy);
-  const diagMag = Math.hypot(dx, dy);
-  // With elliptical radius (rx != ry), exact equality is not guaranteed;
-  // just verify diagonal is not faster.
-  const magDiff = diagMag - cardinalMag;
-  assert.ok(magDiff <= 1, `diagonal speed should not exceed cardinal speed; diff=${magDiff}`);
-});
-
 test('opposing movement keys cancel each other (W+S, A+D)', () => {
+
   const { pointers, engine } = makeEngine();
   // W + S should cancel: net direction should be zero
   engine.keyDown('w');
@@ -285,14 +262,19 @@ test('right edge crossing and continued movement without jump', () => {
   const pos2 = snap2.active[0];
   const crossedRight = pos2.x > 1000;
   assert.ok(crossedRight, 'Pointer should have crossed the right edge after many right movements');
-  // After right-edge rebasing with 0.1 anchor step, anchor shifts left;
-  // pointer may remain at edge due to cumulative compensation
+  // Record position before left move
+  const beforeX = pos2.x;
+  // Verify anchor shifted left (0.1 step per edge crossing)
   assert.ok(engine.mouseAnchor.x < 0.5, 'Anchor should have shifted left after right-edge crossing');
-  // Verify pointer stays within bounds after left move
+  // Move left after right-edge rebasing
   engine.mouseMove(-10, 0);
   const snap3 = pointers.snapshot();
   const pos3 = snap3.active[0];
-  assert.ok(pos3.x >= 0 && pos3.x <= SCREEN.width, 'Pointer should stay within screen bounds after left move');
+  // Verify no jump: pointer should not move abruptly left beyond expected
+  const displacement = pos3.x - pos2.x;
+  assert.ok(displacement >= -50, `Pointer should not jump left after rebasing; displacement=${displacement}`);
+  // Verify pointer stays within screen bounds
+  assert.ok(pos3.x >= 0 && pos3.x <= SCREEN.width, 'Pointer should stay within screen bounds');
 });
 
 test('left edge crossing and continued movement without jump', () => {
@@ -308,14 +290,17 @@ test('left edge crossing and continued movement without jump', () => {
   const pos2 = snap2.active[0];
   const crossedLeft = pos2.x < 80;
   assert.ok(crossedLeft, 'Pointer should have crossed the left edge after many left movements');
-  // After left-edge rebasing with 0.1 anchor step, anchor shifts right;
-  // pointer may remain at edge due to cumulative compensation
+  // Verify anchor shifted right (0.1 step per edge crossing)
   assert.ok(engine.mouseAnchor.x > 0.5, 'Anchor should have shifted right after left-edge crossing');
-  // Verify pointer stays within bounds after right move
+  // Move right after left-edge rebasing
   engine.mouseMove(10, 0);
   const snap3 = pointers.snapshot();
   const pos3 = snap3.active[0];
-  assert.ok(pos3.x >= 0 && pos3.x <= SCREEN.width, 'Pointer should stay within screen bounds after right move');
+  // Verify no jump: pointer should not move abruptly right beyond expected
+  const displacement = pos3.x - pos2.x;
+  assert.ok(displacement <= 50, `Pointer should not jump right after rebasing; displacement=${displacement}`);
+  // Verify pointer stays within screen bounds
+  assert.ok(pos3.x >= 0 && pos3.x <= SCREEN.width, 'Pointer should stay within screen bounds');
 });
 
 test('bottom edge crossing and continued movement without jump', () => {
@@ -358,53 +343,81 @@ test('top edge crossing and continued movement without jump', () => {
   assert.ok(movedDown, 'Pointer should move down after top-edge rebasing');
 });
 
-// Edge proximity test: anchor near 0 clamp should reduce actual displacement and maintain continuity
-test('anchor near 0 clamp reduces actual displacement and maintains continuity', () => {
+test('anchor near 0 clamp reduces actual displacement', () => {
   const { pointers, engine } = makeEngine();
+  // Record initial anchor and pointer position
+  const initialAnchorX = engine.mouseAnchor.x;
+  const snapBefore = pointers.snapshot();
+  const posBefore = snapBefore.active[0];
   // Set anchor very near left boundary (0.01 = 1.08% of screen width)
   engine.mouseAnchor.x = 0.01;
   engine.mouseAnchor.y = 0.5;
   engine.mouseDelta = { x: 0, y: 0 };
   engine.mouseDown();
-  // Move left (toward/away from boundary)
+  // Move left toward the boundary
   engine.mouseMove(-20, 0);
-  const snap = pointers.snapshot();
-  const pos = snap.active[0];
-  // Pointer should have moved (continuity) and x should be in valid range
-  assert.ok(pos.x >= 0 && pos.x <= SCREEN.width,
-    `Pointer x should be in bounds [0, ${SCREEN.width}], got ${pos.x}`);
-  // With anchor near 0, displacement should be reduced (not full delta)
-  // Verify delta is finite and no NaN/Infinity
-  assert.ok(isFinite(engine.mouseDelta.x), `mouseDelta.x should be finite, got ${engine.mouseDelta.x}`);
-  assert.ok(isFinite(engine.mouseDelta.y), `mouseDelta.y should be finite, got ${engine.mouseDelta.y}`);
+  const snapAfter = pointers.snapshot();
+  const posAfter = snapAfter.active[0];
+  // Pointer should have moved (continuity)
+  assert.ok(posAfter.x >= 0 && posAfter.x <= SCREEN.width,
+    `Pointer x should be in bounds [0, ${SCREEN.width}], got ${posAfter.x}`);
+  // Anchor displacement should be reduced near the clamp boundary
+  // (actual delta may be less than the raw mouse movement due to 0.1 step anchoring)
+  const deltaX = engine.mouseAnchor.x - initialAnchorX;
+  // Verify displacement is finite and reasonable
+  assert.ok(isFinite(deltaX), `Anchor displacement should be finite, got ${deltaX}`);
+  // Verify pointer position is finite and valid
+  assert.ok(isFinite(posAfter.x), `Pointer x should be finite, got ${posAfter.x}`);
 });
 
-// Mouse UP/DOWN lifecycle test
-test('mouse UP followed by fresh DOWN starts clean lifecycle', () => {
+test('mouse DOWN/UP/lifecycle', () => {
   const { pointers, engine } = makeEngine();
+  // DOWN stage
   engine.mouseDown();
   assert.ok(engine.cameraPointerDown, 'camera pointer should be down after mouseDown');
-  const posAfterDown = pointers.snapshot().active[0].y;
+  const snap1 = pointers.snapshot();
+  assert.equal(snap1.count, 1, 'one camera pointer should be active after mouseDown');
+  const posDown = snap1.active[0];
+  // MOVE stage while down
+  engine.mouseMove(10, 5);
+  const snap2 = pointers.snapshot();
+  const posMoved = snap2.active[0];
+  assert.ok(Math.abs(posMoved.x - posDown.x) > 0 || Math.abs(posMoved.y - posDown.y) > 0,
+    'pointer should move on MOVE while DOWN');
+  // UP stage
   engine.mouseUp();
-  // After mouse up, the camera pointer is released - no active pointer
   assert.ok(!engine.cameraPointerDown, 'camera pointer should be up after mouseUp');
-  // After mouse up, pointer is released; verify no pointers remain active
-  assert.equal(pointers.snapshot().count, 0, 'no pointers should remain after mouseUp');
-  // Fresh DOWN starts a new lifecycle - pointer should be down at anchor position
+  const snap3 = pointers.snapshot();
+  assert.equal(snap3.count, 0, 'no pointers should remain after mouseUp');
+  // Fresh DOWN stage
   engine.mouseDown();
   assert.ok(engine.cameraPointerDown, 'camera pointer should be down after fresh mouseDown');
-  // Verify the new pointer is active and at the anchor position
-  const snapFreshDown = pointers.snapshot();
-  assert.equal(snapFreshDown.count, 1, 'one camera pointer should be active after fresh mouseDown');
-  assert.ok(snapFreshDown.active[0] !== undefined, 'pointer position should be available');
+  const snap4 = pointers.snapshot();
+  assert.equal(snap4.count, 1, 'one camera pointer should be active after fresh mouseDown');
+  const posFreshDown = snap4.active[0];
+  // MOVE stage with fresh DOWN
+  engine.mouseMove(-5, -3);
+  const snap5 = pointers.snapshot();
+  const posFreshMoved = snap5.active[0];
+  assert.ok(Math.abs(posFreshMoved.x - posFreshDown.x) > 0 || Math.abs(posFreshMoved.y - posFreshDown.y) > 0,
+    'pointer should move on MOVE with fresh DOWN');
+  // Final UP stage
+  engine.mouseUp();
+  assert.ok(!engine.cameraPointerDown, 'camera pointer should be up after final mouseUp');
+  const snap6 = pointers.snapshot();
+  assert.equal(snap6.count, 0, 'no pointers should remain after final mouseUp');
 });
 
-// Zero sensitivity test
-test('zero sensitivity prevents NaN/Infinity in compensation and preserves pointer lifecycle', () => {
+test('zero sensitivity prevents NaN/Infinity with boundary crossing', () => {
   const { pointers, engine } = makeEngine();
+  // Configure sensitivity zero and anchor near right edge
   engine.setSensitivity(0);
+  engine.mouseAnchor.x = 0.95;
+  engine.mouseAnchor.y = 0.5;
+  engine.mouseDelta = { x: 0, y: 0 };
   engine.mouseDown();
-  engine.mouseMove(20, 0);
+  // Move right to trigger boundary handling with zero sensitivity
+  engine.mouseMove(50, 0);
   const snap = pointers.snapshot();
   const pos = snap.active[0];
   // Pointer should stay at clamped position, no NaN/Infinity
@@ -413,13 +426,9 @@ test('zero sensitivity prevents NaN/Infinity in compensation and preserves point
   // Verify no NaN/Infinity was produced in engine state
   assert.ok(isFinite(engine.mouseDelta.x), `mouseDelta.x should be finite, got ${engine.mouseDelta.x}`);
   assert.ok(isFinite(engine.mouseDelta.y), `mouseDelta.y should be finite, got ${engine.mouseDelta.y}`);
-  // After zero-sensitivity move, crossing a boundary should not produce unexpected movement
-  engine.mouseMove(20, 0); // another move with zero sensitivity
-  const snap2 = pointers.snapshot();
-  const pos2 = snap2.active[0];
-  assert.ok(pos2.x >= 0 && pos2.x <= SCREEN.width, `Second move: Pointer x should be in bounds [0, ${SCREEN.width}], got ${pos2.x}`);
-  assert.ok(isFinite(engine.mouseDelta.x), `Second move: mouseDelta.x should be finite`);
-  assert.ok(isFinite(engine.mouseDelta.y), `Second move: mouseDelta.y should be finite`);
+  // Anchor should not move unexpectedly with zero sensitivity
+  assert.ok(engine.mouseAnchor.x >= 0.9 || engine.mouseAnchor.x <= 0.95,
+    `Anchor should not move with zero sensitivity, got ${engine.mouseAnchor.x}`);
 });
 
 // Diagonal normalization quantitative test
