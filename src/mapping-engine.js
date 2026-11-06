@@ -303,10 +303,23 @@ export class MappingEngine {
       this.mouseAnchor.y = Math.max(0.0, this.mouseAnchor.y - 0.1);
     }
 
-    // Reset accumulated delta after boundary rebasing so relative movement
-    // continues correctly from the new anchor position
-    if (hitLeft || hitRight || hitTop || hitBottom) {
-      this.mouseDelta = { x: 0, y: 0 };
+    // Continuous boundary rebasing: adjust delta to offset anchor shift,
+    // ensuring no pointer-position jump when crossing edges.
+    if (hitLeft) {
+      this.mouseAnchor.x = Math.min(1.0, this.mouseAnchor.x + 0.1);
+      this.mouseDelta.x -= 0.1 * this.screen.width / this.mouseSensitivity;
+    }
+    if (hitRight) {
+      this.mouseAnchor.x = Math.max(0.0, this.mouseAnchor.x - 0.1);
+      this.mouseDelta.x += 0.1 * this.screen.width / this.mouseSensitivity;
+    }
+    if (hitTop) {
+      this.mouseAnchor.y = Math.min(1.0, this.mouseAnchor.y + 0.1);
+      this.mouseDelta.y -= 0.1 * this.screen.height / this.mouseSensitivity;
+    }
+    if (hitBottom) {
+      this.mouseAnchor.y = Math.max(0.0, this.mouseAnchor.y - 0.1);
+      this.mouseDelta.y += 0.1 * this.screen.height / this.mouseSensitivity;
     }
     // Use clamped position for pointer (guaranteed within screen bounds)
     const cx = xClamped;
