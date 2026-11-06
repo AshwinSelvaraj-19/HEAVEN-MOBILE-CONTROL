@@ -286,9 +286,6 @@ export class MappingEngine {
     const hitTop = rawY < 0;
     const hitBottom = rawY > this.screen.height - 1;
 
-    // Save anchor position before boundary blocks shift it
-    const oldAnchorX = this.mouseAnchor.x;
-    const oldAnchorY = this.mouseAnchor.y;
     if (hitLeft) {
       // Moved past left edge — shift anchor right to allow continued leftward movement
       this.mouseAnchor.x = Math.min(1.0, this.mouseAnchor.x + 0.1);
@@ -306,16 +303,24 @@ export class MappingEngine {
       this.mouseAnchor.y = Math.max(0.0, this.mouseAnchor.y - 0.1);
     }
 
-    // Calculate actual anchor displacement from the boundary blocks above.
-    // May be less than 0.1 if the anchor is near the 0 or 1 clamp boundary.
-    const actualDeltaX = this.mouseAnchor.x - oldAnchorX;
-    const actualDeltaY = this.mouseAnchor.y - oldAnchorY;
-    
-    // Adjust delta by the negative of the actual anchor displacement,
-    // ensuring continuous pointer position without jump.
-    // Compensation: delta_x * sensitivity should change by -actualDeltaX * screen.width
-    this.mouseDelta.x -= actualDeltaX * this.screen.width / this.mouseSensitivity;
-    this.mouseDelta.y -= actualDeltaY * this.screen.height / this.mouseSensitivity;
+    // Continuous boundary rebasing: adjust delta to offset anchor shift,
+    // ensuring no pointer-position jump when crossing edges.
+    if (hitLeft) {
+      this.mouseAnchor.x = Math.min(1.0, this.mouseAnchor.x + 0.1);
+      this.mouseDelta.x -= 0.1 * this.screen.width / this.mouseSensitivity;
+    }
+    if (hitRight) {
+      this.mouseAnchor.x = Math.max(0.0, this.mouseAnchor.x - 0.1);
+      this.mouseDelta.x += 0.1 * this.screen.width / this.mouseSensitivity;
+    }
+    if (hitTop) {
+      this.mouseAnchor.y = Math.min(1.0, this.mouseAnchor.y + 0.1);
+      this.mouseDelta.y -= 0.1 * this.screen.height / this.mouseSensitivity;
+    }
+    if (hitBottom) {
+      this.mouseAnchor.y = Math.max(0.0, this.mouseAnchor.y - 0.1);
+      this.mouseDelta.y += 0.1 * this.screen.height / this.mouseSensitivity;
+    }
     // Use clamped position for pointer (guaranteed within screen bounds)
     const cx = xClamped;
     const cy = yClamped;
