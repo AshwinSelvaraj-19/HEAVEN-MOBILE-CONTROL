@@ -286,6 +286,9 @@ export class MappingEngine {
     const hitTop = rawY < 0;
     const hitBottom = rawY > this.screen.height - 1;
 
+    // Save anchor position before boundary blocks shift it
+    const oldAnchorX = this.mouseAnchor.x;
+    const oldAnchorY = this.mouseAnchor.y;
     if (hitLeft) {
       // Moved past left edge — shift anchor right to allow continued leftward movement
       this.mouseAnchor.x = Math.min(1.0, this.mouseAnchor.x + 0.1);
@@ -303,22 +306,19 @@ export class MappingEngine {
       this.mouseAnchor.y = Math.max(0.0, this.mouseAnchor.y - 0.1);
     }
 
-    // Continuous boundary rebasing: adjust delta using the actual anchor displacement
-    // that was applied above. This prevents pointer-position jumps when crossing edges.
-    // Handle sensitivity = 0 to avoid division by zero
+    // Calculate actual anchor displacement from the boundary blocks above.
+    // May be less than 0.1 if the anchor is near the 0 or 1 clamp boundary.
+    const actualDeltaX = this.mouseAnchor.x - oldAnchorX;
+    const actualDeltaY = this.mouseAnchor.y - oldAnchorY;
+    
+    // Adjust delta by the negative of the actual anchor displacement.
+    // Guard against division by zero when sensitivity is zero.
     if (this.mouseSensitivity > 0) {
-      if (hitLeft) {
-        this.mouseDelta.x -= 0.1 * this.screen.width / this.mouseSensitivity;
-      }
-      if (hitRight) {
-        this.mouseDelta.x += 0.1 * this.screen.width / this.mouseSensitivity;
-      }
-      if (hitTop) {
-        this.mouseDelta.y -= 0.1 * this.screen.height / this.mouseSensitivity;
-      }
-      if (hitBottom) {
-        this.mouseDelta.y += 0.1 * this.screen.height / this.mouseSensitivity;
-      }
+      this.mouseDelta.x -= actualDeltaX * this.screen.width / this.mouseSensitivity;
+      this.mouseDelta.y -= actualDeltaY * this.screen.height / this.mouseSensitivity;
+    } else {
+      // Zero sensitivity: pointer stays at clamped position, delta unchanged.
+      // No NaN/Infinity will be produced.
     }
     // Use clamped position for pointer (guaranteed within screen bounds)
     const cx = xClamped;
