@@ -309,4 +309,112 @@ test('diagonal normalization preserves consistent speed relative to cardinal (qu
   // Also verify the ratio is close to 1.0 (not the natural 1.414 without normalization)
   const speedRatio = diagMag / cardinalMag;
   assert.ok(speedRatio < 1.1, `diagonal speed ratio should be close to 1.0 after normalization, got ${speedRatio.toFixed(2)}`);
-});
+
+  // Boundary regression tests for Phase 3A
+  test('right edge crossing and continued movement without jump', () => {
+    const { pointers, engine } = makeEngine();
+    engine.mouseDown();
+    const snap1 = pointers.snapshot();
+    assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
+    const pos1 = snap1.active[0];
+    for (let i = 0; i < 60; i++) {
+      engine.mouseMove(10, 0);
+    }
+    const snap2 = pointers.snapshot();
+    const pos2 = snap2.active[0];
+    const crossedRight = pos2.x > 1000;
+    assert.ok(crossedRight, 'Pointer should have crossed the right edge after many right movements');
+    engine.mouseMove(-10, 0);
+    const snap3 = pointers.snapshot();
+    const pos3 = snap3.active[0];
+    const movedLeft = pos3.x < pos2.x;
+    assert.ok(movedLeft, 'Pointer should move left after right-edge rebasing');
+  });
+
+  test('left edge crossing and continued movement without jump', () => {
+    const { pointers, engine } = makeEngine();
+    engine.mouseDown();
+    const snap1 = pointers.snapshot();
+    assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
+    const pos1 = snap1.active[0];
+    for (let i = 0; i < 60; i++) {
+      engine.mouseMove(-10, 0);
+    }
+    const snap2 = pointers.snapshot();
+    const pos2 = snap2.active[0];
+    const crossedLeft = pos2.x < 80;
+    assert.ok(crossedLeft, 'Pointer should have crossed the left edge after many left movements');
+    engine.mouseMove(10, 0);
+    const snap3 = pointers.snapshot();
+    const pos3 = snap3.active[0];
+    const movedRight = pos3.x > pos2.x;
+    assert.ok(movedRight, 'Pointer should move right after left-edge rebasing');
+  });
+
+  test('bottom edge crossing and continued movement without jump', () => {
+    const { pointers, engine } = makeEngine();
+    engine.mouseDown();
+    const snap1 = pointers.snapshot();
+    assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
+    const pos1 = snap1.active[0];
+    for (let i = 0; i < 60; i++) {
+      engine.mouseMove(0, 10);
+    }
+    const snap2 = pointers.snapshot();
+    const pos2 = snap2.active[0];
+    const crossedBottom = pos2.y < 2200;
+    assert.ok(crossedBottom, 'Pointer should have crossed the bottom edge after many down movements');
+    engine.mouseMove(0, -10);
+    const snap3 = pointers.snapshot();
+    const pos3 = snap3.active[0];
+    const movedUp = pos3.y < pos2.y;
+    assert.ok(movedUp, 'Pointer should move up after bottom-edge rebasing');
+  });
+
+  test('top edge crossing and continued movement without jump', () => {
+    const { pointers, engine } = makeEngine();
+    engine.mouseDown();
+    const snap1 = pointers.snapshot();
+    assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
+    const pos1 = snap1.active[0];
+    for (let i = 0; i < 60; i++) {
+      engine.mouseMove(0, -10);
+    }
+    const snap2 = pointers.snapshot();
+    const pos2 = snap2.active[0];
+    const crossedTop = pos2.y > 140;
+    assert.ok(crossedTop, 'Pointer should have crossed the top edge after many up movements');
+    engine.mouseMove(0, 10);
+    const snap3 = pointers.snapshot();
+    const pos3 = snap3.active[0];
+    const movedDown = pos3.y > pos2.y;
+    assert.ok(movedDown, 'Pointer should move down after top-edge rebasing');
+  });
+
+  test('anchor near 0 clamp reduces actual displacement', () => {
+    const { pointers, engine } = makeEngine();
+    engine.mouseAnchor.x = 0.01;
+    engine.mouseAnchor.y = 0.5;
+    engine.mouseDelta = { x: 0, y: 0 };
+    engine.mouseDown();
+    engine.mouseMove(-20, 0);
+    const snap = pointers.snapshot();
+    const pos = snap.active[0];
+    const moved = pos.x > 0;
+    assert.ok(moved, 'Pointer should move even with anchor near clamp boundary');
+  });
+
+  test('mouse UP followed by fresh DOWN starts clean lifecycle', () => {
+    const { pointers, engine } = makeEngine();
+    engine.mouseDown();
+    assert.ok(engine.cameraPointerDown, 'camera pointer should be down after mouseDown');
+    const posAfterDown = pointers.snapshot().active[0].y;
+    engine.mouseUp();
+    assert.ok(!engine.cameraPointerDown, 'camera pointer should be up after mouseUp');
+    const posAfterUp = pointers.snapshot().active[0];
+    engine.mouseDown();
+    assert.ok(engine.cameraPointerDown, 'camera pointer should be down after fresh mouseDown');
+    const posFreshDown = pointers.snapshot().active[0].y;
+    const movedAgain = posFreshDown < posAfterDown;
+    assert.ok(movedAgain, 'Fresh DOWN should move pointer after UP');
+  });});

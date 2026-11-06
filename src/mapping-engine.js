@@ -311,11 +311,15 @@ export class MappingEngine {
     const actualDeltaX = this.mouseAnchor.x - oldAnchorX;
     const actualDeltaY = this.mouseAnchor.y - oldAnchorY;
     
-    // Adjust delta by the negative of the actual anchor displacement,
-    // ensuring continuous pointer position without jump.
-    // Compensation: delta_x * sensitivity should change by -actualDeltaX * screen.width
-    this.mouseDelta.x -= actualDeltaX * this.screen.width / this.mouseSensitivity;
-    this.mouseDelta.y -= actualDeltaY * this.screen.height / this.mouseSensitivity;
+    // Adjust delta by the negative of the actual anchor displacement.
+    // Guard against division by zero when sensitivity is zero.
+    if (this.mouseSensitivity > 0) {
+      this.mouseDelta.x -= actualDeltaX * this.screen.width / this.mouseSensitivity;
+      this.mouseDelta.y -= actualDeltaY * this.screen.height / this.mouseSensitivity;
+    } else {
+      // Zero sensitivity: pointer stays at clamped position, delta unchanged.
+      // No NaN/Infinity will be produced.
+    }
     // Use clamped position for pointer (guaranteed within screen bounds)
     const cx = xClamped;
     const cy = yClamped;
