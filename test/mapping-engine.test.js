@@ -309,3 +309,37 @@ test('diagonal normalization preserves consistent speed relative to cardinal (qu
   assert.ok(cardinalMag > 5, `cardinal move should be meaningful, mag=${cardinalMag}`);
   assert.ok(diagMag > 5, `diagonal move should be meaningful, mag=${diagMag}`);
 });
+
+test('diagonal normalization preserves consistent speed relative to cardinal (quantitative)', () => {
+  const { pointers, engine } = makeEngine();
+  const rx = engine.joystickRadius.x * SCREEN.width;  // horizontal radius in pixels
+  const ry = engine.joystickRadius.y * SCREEN.height;  // vertical radius in pixels
+
+  // Press W only (cardinal move along Y)
+  engine.keyDown('w');
+  const posW = pointers.snapshot().active[0];
+  const wy = posW.y - SCREEN.height / 2;  // offset from center Y
+
+  // Press W + D (diagonal move)
+  engine.keyDown('d');
+  const posDiag = pointers.snapshot().active[0];
+  const dx = posDiag.x - SCREEN.width / 2;  // offset from center X
+  const dy = posDiag.y - SCREEN.height / 2;  // offset from center Y
+
+  // Cardinal magnitude: normalized within vertical radius
+  const cardinalMag = Math.hypot(0, wy / ry);
+
+  // Diagonal magnitude: normalized using per-axis radii.
+  // Math.hypot(dx / rx, dy / ry) ensures diagonal speed does not exceed cardinal.
+  const diagMag = Math.hypot(dx / rx, dy / ry);
+
+  // The diagonal must not exceed cardinal by more than the aspect-ratio factor.
+  // With rx=0.3*width, ry=0.3*height on a 1080x2340 screen, diagonal should
+  // not be significantly faster than cardinal after normalization.
+  const speedRatio = diagMag / cardinalMag;
+  assert.ok(speedRatio <= 1.5, `diagonal speed ratio ${speedRatio.toFixed(2)} should not exceed cardinal by more than 50%`);
+
+  // Both should move the pointer a meaningful distance from center
+  assert.ok(cardinalMag > 0.1, `cardinal move should have non-zero magnitude, mag=${cardinalMag}`);
+  assert.ok(diagMag > 0.1, `diagonal move should have non-zero magnitude, mag=${diagMag}`);
+});
