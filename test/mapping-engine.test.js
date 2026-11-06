@@ -96,7 +96,7 @@ test('combined movement keys produce correct directional vector', () => {
   const pos = snap.active[0];
   // Position x should be less than center (moving left), y should be less (moving up/forward)
   assert.ok(pos.x < 1080 / 2, `x should be left of center, got ${pos.x}`);
-  assert.ok(pos.y > 0, `y should have some forward component, got ${pos.y}`);
+  assert.ok(pos.y < SCREEN.height / 2, `y should be above center (northwest), got ${pos.y}`);
 });
 
 test('diagonal normalization preserves consistent speed', () => {
@@ -272,4 +272,41 @@ test('disconnect behavior — emergency release does not throw when session lost
     'emergency release should not throw when channel is closed');
   const snap = pointers.snapshot();
   assert.equal(snap.count, 0, 'emergency release should still clear all pointers');
+});
+
+;
+
+test('diagonal normalization preserves consistent speed relative to cardinal (quantitative)', () => {
+  const { pointers, engine } = makeEngine();
+  const rx = engine.joystickRadius.x * SCREEN.width;  // horizontal radius in pixels
+  const ry = engine.joystickRadius.y * SCREEN.height;  // vertical radius in pixels
+
+  // Press W only (cardinal move along Y)
+  engine.keyDown('w');
+  const posW = pointers.snapshot().active[0];
+  const wy = posW.y - SCREEN.height / 2;  // offset from center Y
+
+  // Press W + D (diagonal move)
+  engine.keyDown('d');
+  const posDiag = pointers.snapshot().active[0];
+  const dx = posDiag.x - SCREEN.width / 2;  // offset from center X
+  const dy = posDiag.y - SCREEN.height / 2;  // offset from center Y
+
+  // Cardinal magnitude: normalized within vertical radius
+  const cardinalMag = Math.hypot(0, wy / ry);
+
+  // Diagonal magnitude: normalized using per-axis radii.
+  // Math.hypot(dx / rx, dy / ry) ensures diagonal speed does not exceed cardinal.
+  const diagMag = Math.hypot(dx / rx, dy / ry);
+
+  // Both magnitudes should be approximately 1.0 after hypot normalization.
+  // Without the engine's Math.hypot(dirX, dirY) normalization, the diagonal
+  // magnitude would be ~1.414 times the cardinal, which this strict check rejects.
+  const cardinalIsOne = cardinalMag > 0.8 && cardinalMag < 1.2;
+  const diagIsOne = diagMag > 0.8 && diagMag < 1.2;
+  assert.ok(cardinalIsOne, `cardinal magnitude should be ~1.0 after normalization, got ${cardinalMag.toFixed(2)}`);
+  assert.ok(diagIsOne, `diagonal magnitude should be ~1.0 after normalization, got ${diagMag.toFixed(2)}`);
+  // Also verify the ratio is close to 1.0 (not the natural 1.414 without normalization)
+  const speedRatio = diagMag / cardinalMag;
+  assert.ok(speedRatio < 1.1, `diagonal speed ratio should be close to 1.0 after normalization, got ${speedRatio.toFixed(2)}`);
 });
