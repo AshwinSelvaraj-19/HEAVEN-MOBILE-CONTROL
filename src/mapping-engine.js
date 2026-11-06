@@ -7,7 +7,7 @@
  *  - Persistent virtual joystick pointer for WASD (stays down until all movement keys released).
  *  - Relative mouse camera movement with configurable sensitivity and anchor.
  *  - Emergency release of all locally tracked active pointers.
- *  - Proper cleanup of pending timers and event state.
+ *  - Clean up local pointer and key state after events.
  *
  * CRITICAL ARCHITECTURE RULES (enforced by design, not just commentary):
  *  - PointerManager is the ONLY component responsible for pointer allocation and lifecycle.
@@ -192,14 +192,14 @@ export class MappingEngine {
     // If the 'joystick' name is already down, PointerManager will throw;
     // that is intentional enforcement, not a MappingEngine bug.
     if (this.joystickPointerDown) {
-      this.pm.move('joystick', nx, ny);
+      this.pm.move('joystick', clamped.x, clamped.y);
     } else {
       // First move after start — down() was already called in _startJoystickPointer()
       // but we re-apply the position here so the pointer lands correctly.
       // This branch is technically unreachable if _startJoystickPointer() ran,
       // but we keep it for defense-in-depth.
       if (!this.joystickPointerDown && this.pm.active.has('joystick')) {
-        this.pm.move('joystick', nx, ny);
+        this.pm.move('joystick', clamped.x, clamped.y);
       }
     }
   }
@@ -403,7 +403,7 @@ export class MappingEngine {
    * - Calls PointerManager.panic() which sends N × ACTION_UP.
    * - Does NOT claim the remote release succeeded if the device connection
    *   has already been lost; it only cancels local tracking.
-   * - Clears all pending timers.
+   * - Cancels local tracking of pointers after emergency release.
    * @param {string} [reason] - optional label for the panic log
    */
   emergencyRelease(reason) {
@@ -425,8 +425,6 @@ export class MappingEngine {
     this.keyState.a = false;
     this.keyState.s = false;
     this.keyState.d = false;
-
-    // Clear any pending timers
 
   }
 

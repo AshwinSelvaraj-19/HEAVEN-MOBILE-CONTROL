@@ -273,3 +273,39 @@ test('disconnect behavior — emergency release does not throw when session lost
   const snap = pointers.snapshot();
   assert.equal(snap.count, 0, 'emergency release should still clear all pointers');
 });
+
+test('diagonal normalization preserves consistent speed relative to cardinal (quantitative)', () => {
+  const { pointers, engine } = makeEngine();
+  const rx = engine.joystickRadius.x * SCREEN.width;  // horizontal radius in pixels
+  const ry = engine.joystickRadius.y * SCREEN.height;  // vertical radius in pixels
+
+  // Press W only (cardinal move along Y)
+  engine.keyDown('w');
+  const posW = pointers.snapshot().active[0];
+  const wy = posW.y - SCREEN.height / 2;  // offset from center Y
+
+  // Press W + D (diagonal move)
+  engine.keyDown('d');
+  const posDiag = pointers.snapshot().active[0];
+  const dx = posDiag.x - SCREEN.width / 2;  // offset from center X
+  const dy = posDiag.y - SCREEN.height / 2;  // offset from center Y
+
+  // Cardinal magnitude: pure Y movement within vertical radius
+  const cardinalMag = Math.abs(wy);
+
+  // Diagonal magnitude: normalized direction within elliptical radius.
+  // After hypot normalization, the effective displacement is hypot(rx, ry) / sqrt(2)
+  // when moving perfectly diagonal, but because rx != ry, the ratio depends on aspect.
+  const diagMag = Math.hypot(dx, dy);
+
+  // The diagonal must not exceed cardinal by more than the aspect-ratio factor.
+  // With rx=0.3*width, ry=0.3*height on a 1080x2340 screen, diagonal should
+  // not be significantly faster than cardinal after normalization.
+  const maxAllowedRatio = ry / rx;  // vertical/horizontal radius ratio
+  const speedRatio = diagMag / Math.max(cardinalMag, 0.01);
+  assert.ok(speedRatio <= 1.5, `diagonal speed ratio ${speedRatio.toFixed(2)} should not exceed cardinal by more than 50%`);
+
+  // Both should move the pointer a meaningful distance from center
+  assert.ok(cardinalMag > 5, `cardinal move should be meaningful, mag=${cardinalMag}`);
+  assert.ok(diagMag > 5, `diagonal move should be meaningful, mag=${diagMag}`);
+});
