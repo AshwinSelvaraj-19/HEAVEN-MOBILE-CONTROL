@@ -168,14 +168,24 @@ test('pointer allocation collision prevention — different names independent', 
   assert.ok(engine.joystickPointerDown, 'joystick pointer down');
   assert.ok(engine.cameraPointerDown, 'camera pointer down');
 });
-test('emergency release clears all locally tracked pointers', () => {
+test('emergency release waits for PointerManager panic and clears local state', async () => {
   const { pointers, engine } = makeEngine();
   engine.keyDown('w');
   engine.mouseDown();
   // Both pointers should be active
   let snap = pointers.snapshot();
   assert.equal(snap.count, 2, 'two pointers should be active before emergency release');
-  engine.emergencyRelease('test-reason');
+  let panicComplete = false;
+  const panic = pointers.panic.bind(pointers);
+  pointers.panic = async (reason) => {
+    const released = await panic(reason);
+    panicComplete = true;
+    return released;
+  };
+  const cleanup = engine.emergencyRelease('test-reason');
+  assert.equal(typeof cleanup.then, 'function', 'cleanup should return a completion promise');
+  await cleanup;
+  assert.ok(panicComplete, 'cleanup should resolve after panic and channel flush complete');
   // After emergency release, no pointers should remain
   snap = pointers.snapshot();
   assert.equal(snap.count, 0, 'emergency release should clear all pointers');
@@ -209,135 +219,110 @@ test('regression: W down, A down, W up moves from northwest to left, A up releas
   assert.ok(!engine.joystickPointerDown, 'pointer should be released after A up');
   assert.equal(pointers.snapshot().count, 0, 'no pointers should remain active');
 });
-test('disconnect behavior — emergency release does not throw when session lost', () => {
+test('disconnect behavior — emergency release does not throw when session lost', async () => {
   const { pointers, engine } = makeEngine();
   // Simulate a lost session by clearing the channel
   pointers.session.channel.closed = true;
   // Emergency release should not throw even with closed channel
-  assert.doesNotThrow(() => engine.emergencyRelease('simulated-disconnect'),
-    'emergency release should not throw when channel is closed');
+  await assert.doesNotReject(engine.emergencyRelease('simulated-disconnect'),
+    'emergency release should not reject when channel is closed');
   const snap = pointers.snapshot();
   assert.equal(snap.count, 0, 'emergency release should still clear all pointers');
 });
 // ---- Boundary regression tests for Phase 3A ----
-test('right edge crossing and continued movement without jump', () => {
+test('right edge crossing rebases the pointer and preserves reverse movement', () => {
   const { pointers, engine } = makeEngine();
   engine.mouseDown();
   const snap1 = pointers.snapshot();
   assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
   const pos1 = snap1.active[0];
-  for (let i = 0; i < 60; i++) {
-    engine.mouseMove(10, 0);
-  }
+  engine.mouseMove(600, 0);
   const snap2 = pointers.snapshot();
   const pos2 = snap2.active[0];
-  const crossedRight = pos2.x > 1000;
-  assert.ok(crossedRight, 'Pointer should have crossed the right edge after many right movements');
-  // Record position before left move
-  const beforeX = pos2.x;
-  // Verify anchor shifted left (0.1 step per edge crossing)
-  assert.ok(engine.mouseAnchor.x < 0.5, 'Anchor should have shifted left after right-edge crossing');
-  // Move left after right-edge rebasing
-  engine.mouseMove(-10, 0);
-  const snap3 = pointers.snapshot();
-  const pos3 = snap3.active[0];
-  // Verify no jump: pointer should not move abruptly left beyond expected
-  const displacement = pos3.x - pos2.x;
-  assert.ok(displacement >= -50, `Pointer should not jump left after rebasing; displacement=${displacement}`);
-  // Verify pointer stays within screen bounds
-  assert.ok(pos3.x >= 0 && pos3.x <= SCREEN.width, 'Pointer should stay within screen bounds');
-  // Verify anchor is < 0.5 (shifted left) or at the left boundary
-  assert.ok(engine.mouseAnchor.x < 0.5 || engine.mouseAnchor.x <= 0.1,
-    `Anchor should shift left or be at left boundary; got ${engine.mouseAnchor.x}`);
-});
-test('left edge crossing and continued movement without jump', () => {
-  const { pointers, engine } = makeEngine();
-  engine.mouseDown();
-  const snap1 = pointers.snapshot();
-  assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
-  const pos1 = snap1.active[0];
-  for (let i = 0; i < 60; i++) {
-    engine.mouseMove(-10, 0);
-  }
-  const snap2 = pointers.snapshot();
-  const pos2 = snap2.active[0];
-  const crossedLeft = pos2.x < 80;
-  assert.ok(crossedLeft, 'Pointer should have crossed the left edge after many left movements');
-  // Verify anchor shifted right (0.1 step per edge crossing)
-  assert.ok(engine.mouseAnchor.x > 0.5, 'Anchor should have shifted right after left-edge crossing');
-  // Move right after left-edge rebasing
+  assert.equal(pos2.x, SCREEN.width - 1, 'pointer should reach the right screen edge');
+  assert.ok(engine.mouseAnchor.x < 0.5, 'anchor should shift left after a right-edge crossing');
   engine.mouseMove(10, 0);
-  const snap3 = pointers.snapshot();
-  const pos3 = snap3.active[0];
-  // Verify no jump: pointer should not move abruptly right beyond expected
-  const displacement = pos3.x - pos2.x;
-  assert.ok(displacement <= 50, `Pointer should not jump right after rebasing; displacement=${displacement}`);
-  // Verify pointer stays within screen bounds
-  assert.ok(pos3.x >= 0 && pos3.x <= SCREEN.width, 'Pointer should stay within screen bounds');
-  // Verify anchor is > 0.5 (shifted right) or at the right boundary
-  assert.ok(engine.mouseAnchor.x > 0.5 || engine.mouseAnchor.x >= 0.9,
-    `Anchor should shift right or be at right boundary; got ${engine.mouseAnchor.x}`);
+  const pos3 = pointers.snapshot().active[0];
+  assert.ok(pos3.x < pos2.x, 'rebased pointer should continue on the far side of the right edge');
+  const beforeReverse = pos3.x;
+  engine.mouseMove(-10, 0);
+  const pos4 = pointers.snapshot().active[0];
+  assert.ok(pos4.x < beforeReverse, 'leftward mouse movement should move the pointer left');
+  assert.ok(pos4.x >= 0 && pos4.x < SCREEN.width, 'pointer should remain within screen bounds');
 });
-test('bottom edge crossing and continued movement without jump', () => {
+test('left edge crossing rebases the pointer and preserves reverse movement', () => {
   const { pointers, engine } = makeEngine();
   engine.mouseDown();
   const snap1 = pointers.snapshot();
   assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
   const pos1 = snap1.active[0];
-  for (let i = 0; i < 60; i++) {
-    engine.mouseMove(0, 10);
-  }
+  engine.mouseMove(-600, 0);
   const snap2 = pointers.snapshot();
   const pos2 = snap2.active[0];
-  const crossedBottom = pos2.y < 2200;
-  assert.ok(crossedBottom, 'Pointer should have crossed the bottom edge after many down movements');
-  engine.mouseMove(0, -10);
-  const snap3 = pointers.snapshot();
-  const pos3 = snap3.active[0];
-  const movedUp = pos3.y < pos2.y;
-  assert.ok(movedUp, 'Pointer should move up after bottom-edge rebasing');
+  assert.equal(pos2.x, 0, 'pointer should reach the left screen edge');
+  assert.ok(engine.mouseAnchor.x > 0.5, 'anchor should shift right after a left-edge crossing');
+  engine.mouseMove(-10, 0);
+  const pos3 = pointers.snapshot().active[0];
+  assert.ok(pos3.x > pos2.x, 'rebased pointer should continue on the far side of the left edge');
+  const beforeReverse = pos3.x;
+  engine.mouseMove(10, 0);
+  const pos4 = pointers.snapshot().active[0];
+  assert.ok(pos4.x > beforeReverse, 'rightward mouse movement should move the pointer right');
+  assert.ok(pos4.x >= 0 && pos4.x < SCREEN.width, 'pointer should remain within screen bounds');
 });
-test('top edge crossing and continued movement without jump', () => {
+test('bottom edge crossing rebases the pointer and preserves reverse movement', () => {
   const { pointers, engine } = makeEngine();
   engine.mouseDown();
   const snap1 = pointers.snapshot();
   assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
   const pos1 = snap1.active[0];
-  for (let i = 0; i < 60; i++) {
-    engine.mouseMove(0, -10);
-  }
+  engine.mouseMove(0, 1200);
   const snap2 = pointers.snapshot();
   const pos2 = snap2.active[0];
-  const crossedTop = pos2.y > 140;
-  assert.ok(crossedTop, 'Pointer should have crossed the top edge after many up movements');
+  assert.equal(pos2.y, SCREEN.height - 1, 'pointer should reach the bottom screen edge');
+  assert.ok(engine.mouseAnchor.y < 0.5, 'anchor should shift up after a bottom-edge crossing');
   engine.mouseMove(0, 10);
-  const snap3 = pointers.snapshot();
-  const pos3 = snap3.active[0];
-  const movedDown = pos3.y > pos2.y;
-  assert.ok(movedDown, 'Pointer should move down after top-edge rebasing');
+  const pos3 = pointers.snapshot().active[0];
+  assert.ok(pos3.y < pos2.y, 'rebased pointer should continue on the far side of the bottom edge');
+  const beforeReverse = pos3.y;
+  engine.mouseMove(0, -10);
+  const pos4 = pointers.snapshot().active[0];
+  assert.ok(pos4.y < beforeReverse, 'upward mouse movement should move the pointer up');
+});
+test('top edge crossing rebases the pointer and preserves reverse movement', () => {
+  const { pointers, engine } = makeEngine();
+  engine.mouseDown();
+  const snap1 = pointers.snapshot();
+  assert.equal(snap1.count, 1, 'camera pointer should be active after mouseDown');
+  const pos1 = snap1.active[0];
+  engine.mouseMove(0, -1200);
+  const snap2 = pointers.snapshot();
+  const pos2 = snap2.active[0];
+  assert.equal(pos2.y, 0, 'pointer should reach the top screen edge');
+  assert.ok(engine.mouseAnchor.y > 0.5, 'anchor should shift down after a top-edge crossing');
+  engine.mouseMove(0, 10);
+  const pos3 = pointers.snapshot().active[0];
+  assert.ok(pos3.y > pos2.y, 'rebased pointer should continue on the far side of the top edge');
+  const beforeReverse = pos3.y;
+  engine.mouseMove(0, -10);
+  const pos4 = pointers.snapshot().active[0];
+  assert.ok(pos4.y < beforeReverse, 'upward mouse movement should move the pointer up');
 });
 test('anchor near 0 clamp: measures actual anchor change and pointer continuity', () => {
   const { pointers, engine } = makeEngine();
-  // Record baseline before reconfiguration
-  const initialAnchorX = engine.mouseAnchor.x;
-  const snapBefore = pointers.snapshot();
-  const posBefore = snapBefore.active[0];
-  // Set anchor very near left boundary (0.01 = 1.08% of screen width)
+  // Set anchor near zero, then cross the right edge so the anchor's leftward
+  // adjustment is clamped at zero.
   engine.mouseAnchor.x = 0.01;
   engine.mouseAnchor.y = 0.5;
   engine.mouseDelta = { x: 0, y: 0 };
   engine.mouseDown();
-  // Move left toward the boundary
-  engine.mouseMove(-20, 0);
+  engine.mouseMove(1200, 0);
   const snapAfter = pointers.snapshot();
   const posAfter = snapAfter.active[0];
   // Pointer should have moved (continuity) and x should be in valid range
   assert.ok(posAfter.x >= 0 && posAfter.x <= SCREEN.width,
     `Pointer x should be in bounds [0, ${SCREEN.width}], got ${posAfter.x}`);
-  // Measure actual anchor change caused by boundary handling
-  const anchorChange = engine.mouseAnchor.x - initialAnchorX;
-  // Anchor displacement should be finite and reasonable
-  assert.ok(isFinite(anchorChange), `Anchor displacement should be finite, got ${anchorChange}`);
+  assert.equal(engine.mouseAnchor.x, 0, 'anchor should clamp at zero after right-edge rebasing');
   // Anchor should be within clamped range [0,1]
   assert.ok(engine.mouseAnchor.x >= 0 && engine.mouseAnchor.x <= 1.0,
     `Anchor should be clamped within [0,1]; got ${engine.mouseAnchor.x}`);
@@ -390,14 +375,13 @@ test('zero sensitivity: anchor unchanged, no NaN/Infinity, pointer valid, no une
   engine.mouseAnchor.y = 0.5;
   engine.mouseDelta = { x: 0, y: 0 };
   engine.mouseDown();
-  // Move right 50 pixels - raw position should cross screen boundary (1080px wide)
-  // At anchor 0.95 * 1080 = 1026px, moving right 50px = 1076px
-  engine.mouseMove(50, 0);
+  // A large relative delta still produces no pointer movement at zero sensitivity.
+  engine.mouseMove(1000, 0);
   const snap = pointers.snapshot();
   const pos = snap.active[0];
   // Pointer should stay at clamped position, no NaN/Infinity
-  assert.ok(pos.x >= 0 && pos.x <= SCREEN.width, `Pointer x should be in bounds [0, ${SCREEN.width}], got ${pos.x}`);
-  assert.ok(pos.y >= 0 && pos.y <= SCREEN.height, `Pointer y should be in bounds [0, ${SCREEN.height}], got ${pos.y}`);
+  assert.equal(pos.x, Math.round(0.95 * SCREEN.width), 'pointer should remain at the anchor with zero sensitivity');
+  assert.equal(pos.y, Math.round(0.5 * SCREEN.height), 'pointer y should remain at its anchor');
   // Verify no NaN/Infinity in engine state
   assert.ok(isFinite(engine.mouseDelta.x), `mouseDelta.x should be finite, got ${engine.mouseDelta.x}`);
   assert.ok(isFinite(engine.mouseDelta.y), `mouseDelta.y should be finite, got ${engine.mouseDelta.y}`);
@@ -406,9 +390,7 @@ test('zero sensitivity: anchor unchanged, no NaN/Infinity, pointer valid, no une
   const anchorX = engine.mouseAnchor.x;
   assert.ok(anchorX >= 0.94 && anchorX <= 0.96,
     `Anchor should remain at 0.95 with zero sensitivity; got ${anchorX}`);
-  // No unexpected pointer movement - pointer should be at or near the clamped position
-  assert.ok(Math.abs(pos.x - 1080) < 20 || pos.x < 1050,
-    `Pointer should be at clamped position near edge; got ${pos.x}`);
+  assert.equal(engine.mouseDelta.x, 1000, 'zero sensitivity should retain finite relative input');
 });// Diagonal normalization quantitative test
 test('diagonal normalization preserves consistent speed relative to cardinal (quantitative)', () => {
   const { pointers, engine } = makeEngine();

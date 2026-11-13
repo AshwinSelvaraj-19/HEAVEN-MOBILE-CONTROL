@@ -1,8 +1,8 @@
 {
-  "name": "heaven-mobile-control-poc",
-  "version": "0.2.0-poc",
+  "name": "heaven-mobile-control",
+  "version": "0.3.0",
   "private": true,
-  "description": "Phase 2 proof of concept: multi-touch injection over USB ADB using a control-only scrcpy 4.1 server session (no root, no Shizuku, no Wi-Fi).",
+  "description": "Windows keyboard and mouse mapping to Android touch over USB ADB and scrcpy 4.1.",
   "type": "module",
   "engines": {
     "node": ">=22.6.0"
@@ -13,8 +13,10 @@
     "selftest": "node src/main.js --selftest",
     "proof": "node src/main.js --proof",
     "hold": "node src/main.js --proof --keep-held 8000",
-    "test": "node --test",
-    "check": "node --check src/main.js && node --check src/ui-server.js && node --check src/ui-page.js"
+    "live": "node src/main.js --live",
+    "test": "node --test \"test/*.test.js\"",
+    "check": "node --check src/adb.js && node --check src/config.js && node --check src/control-channel.js && node --check src/device.js && node --check src/errors.js && node --check src/log.js && node --check src/main.js && node --check src/mapping-engine.js && node --check src/mock-session.js && node --check src/pointers.js && node --check src/protocol.js && node --check src/screen-capture.js && node --check src/scrcpy-video.js && node --check src/sequences.js && node --check src/session.js && node --check src/ui-page.js && node --check src/ui-server.js",
+    "build": "npm run check"
   },
   "dependencies": {},
   "devDependencies": {}

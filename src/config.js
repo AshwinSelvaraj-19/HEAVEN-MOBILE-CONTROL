@@ -134,7 +134,7 @@ function assertFile(file, label, code) {
  * @property {boolean} verbose
  * @property {string} logFile
  * @property {number} messageHz
- * @property {string} mode  'ui' | 'selftest' | 'proof' | 'dry-run'
+ * @property {string} mode  'ui' | 'selftest' | 'proof' | 'dry-run' | 'live'
  * @property {number} sweepMs
  * @property {number} keepHeldMs
  * @property {boolean} allowPowerOn
@@ -183,28 +183,33 @@ export function parseArgs(argv, base = {}) {
       ? 'selftest'
       : flags.proof
         ? 'proof'
-        : 'ui';
+        : flags.live
+          ? 'live'
+          : 'ui';
 
   const config = {
     ...defaults(base),
     mode,
     serial: str(flags.serial) ?? base.serial ?? null,
     uiPort: num(flags['ui-port'], base.uiPort ?? 7373),
-    ui: !flags['no-ui'] && mode === 'ui',
-    openBrowser: !flags['no-open'] && mode === 'ui',
+    ui: !flags['no-ui'] && (mode === 'ui' || mode === 'live'),
+    openBrowser: !flags['no-ui'] && !flags['no-open'] && (mode === 'ui' || mode === 'live'),
     verbose: Boolean(flags.verbose),
     logFile: str(flags['log-file']) ?? base.logFile ?? defaultLogFile(),
     messageHz: num(flags.hz, base.messageHz ?? 120),
     sweepMs: num(flags['sweep-ms'], base.sweepMs ?? 2000),
     keepHeldMs: num(flags['keep-held'], base.keepHeldMs ?? 0),
     allowPowerOn: Boolean(flags['allow-power-on']),
+    mouseSensitivity: nonNegative(flags['mouse-sensitivity'], base.mouseSensitivity ?? 1.0),
     mock: Boolean(flags.mock) || base.mock === true,
   };
 
-  const toolchain = resolveToolchain({
-    adb: str(flags.adb) ?? base.adb,
-    serverJar: str(flags['server-jar']) ?? base.serverJar,
-  });
+  const toolchain = config.mock
+    ? { adbPath: '(mock)', serverJarPath: '(mock)', serverJarSize: null, adbVersion: null }
+    : resolveToolchain({
+        adb: str(flags.adb) ?? base.adb,
+        serverJar: str(flags['server-jar']) ?? base.serverJar,
+      });
 
   return { config, toolchain };
 }
@@ -234,15 +239,16 @@ export function defaultLogFile() {
 }
 
 export const HELP = `
-HEAVEN-MOBILE-CONTROL — Phase 2 multi-touch PoC
+HEAVEN-MOBILE-CONTROL — USB keyboard and mouse controller
 
 Usage:
   node src/main.js [options]
 
-Modes (default: interactive UI):
-  (none)            Start a control-only session and the loopback test UI
+Modes (default: interactive controller):
+  (none)            Start the USB controller UI
   --selftest        Detect device, start session, tap once, panic, exit
   --proof           Run the automated two-pointer proof sequence, print JSON
+  --live            Start the keyboard/mouse controller UI
   --dry-run         Resolve toolchain + device, print the plan, touch nothing
 
 Options:
@@ -255,6 +261,7 @@ Options:
   --hz <n>          Move message rate for sweeps (default 120)
   --sweep-ms <n>    Duration of the moving pointer in --proof (default 2000)
   --keep-held <ms>  After the proof, hold both pointers this long (visual check)
+  --mouse-sensitivity <n>  Initial camera sensitivity (default 1.0)
   --allow-power-on  Permit the server to press POWER if the screen is off
   --mock            Verification harness: no device, messages are counted only
   --log-file <p>    JSONL log path (default logs/heaven-poc-<stamp>.jsonl)
@@ -281,4 +288,11 @@ function num(value, fallback) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** @param {unknown} value @param {number} fallback */
+function nonNegative(value, fallback) {
+  if (value === undefined || value === true || value === false) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(10, Math.max(0, parsed)) : fallback;
 }

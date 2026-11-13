@@ -31,17 +31,28 @@ const HEARTBEAT_TIMEOUT_MS = 3000;
  * @param {import('./log.js').Logger} options.logger 
  * @param {import('./session.js').ScrcpySession | import('./mock-session.js').MockSession} options.session 
  * @param {import('./pointers.js').PointerManager} options.pointers 
+ * @param {import('./mapping-engine.js').MappingEngine} [options.mapping]
+ * @param {import('./screen-capture.js').ScreenCapture} [options.screenCapture]
+ * @param {import('./session.js').ScrcpySession} [options.session] Native scrcpy H.264 video socket.
  * @param {import('./device.js').DeviceInfo} options.device 
  * @param {boolean} [options.mock] 
  */ 
 export async function startUiServer(options) {
-  const { config, logger, session, pointers, device } = options;
+  const { config, logger, session, pointers, mapping, screenCapture, device } = options;
+  const screen = pointers.screen;
   const token = crypto.randomBytes(18).toString('hex');
   const mock = options.mock ?? false;
 
   let lastSweep = null;
   let lastProof = null;
   let busy = false;
+  let mappingActive = false;
+  let mappingTargets = null;
+  let mappingBindings = null;
+  let mappingTaps = new Map();
+  let activeTaps = new Map();
+  let cameraEnabled = false;
+  const triggerSources = { shoot: new Set(), scope: new Set() };
   let lastPollAt = Date.now();
   let closed = false;
 
@@ -51,6 +62,19 @@ export async function startUiServer(options) {
     height: device.height,
     model: device.model,
     mock,
+    screenAvailable: Boolean(screenCapture),
+    videoAvailable: Boolean(session.videoStream),
+    mouseSensitivity: config.mouseSensitivity ?? 1,
+  });
+
+  session.videoStream?.onDisplaySize(async (width, height) => {
+    if (screen.width === width && screen.height === height) return;
+    if (mapping) await mapping.emergencyRelease('screen-orientation-changed');
+    else await pointers.panic('screen-orientation-changed');
+    screen.width = width;
+    screen.height = height;
+    if (mapping && mappingActive && cameraEnabled) mapping.mouseDown();
+    logger.info('phone display orientation changed', { width, height });
   });
 
   const watchdog = setInterval(() => {
@@ -67,7 +91,9 @@ export async function startUiServer(options) {
   const server = http.createServer((req, res) => {
     handle(req, res).catch((error) => {
       const appError = asAppError(error);
-      logger.warn('ui request failed', { code: appError.code, message: appError.message, url: req.url });
+      if (!(appError.code === ErrorCode.BAD_REQUEST && appError.message === 'Missing or invalid UI token')) {
+        logger.warn('ui request failed', { code: appError.code, message: appError.message, url: req.url });
+      }
       sendJson(res, statusFor(appError), { ...appError.toJSON() });
     });
   });
@@ -90,6 +116,53 @@ export async function startUiServer(options) {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/screen') {
+      requireToken(req, url);
+      if (!screenCapture) {
+        sendJson(res, 503, { code: 'SCREEN_UNAVAILABLE', message: 'Connect a phone and start a real USB session to view its screen.' });
+        return;
+      }
+      try {
+        const frame = await screenCapture.capture();
+        const dimensions = screenCapture.dimensions(frame);
+        if (screen.width !== dimensions.width || screen.height !== dimensions.height) {
+          if (mapping) await mapping.emergencyRelease('screen-orientation-changed');
+          else await pointers.panic('screen-orientation-changed');
+          screen.width = dimensions.width;
+          screen.height = dimensions.height;
+          if (mapping && mappingActive && cameraEnabled) mapping.mouseDown();
+          logger.info('phone display orientation changed', dimensions);
+        }
+        res.writeHead(200, {
+          'content-type': 'image/png',
+          'content-length': frame.length,
+          'cache-control': 'no-store',
+          'x-display-width': String(dimensions.width),
+          'x-display-height': String(dimensions.height),
+        });
+        res.end(frame);
+      } catch (error) {
+        logger.warn('phone screen capture failed', { message: error instanceof Error ? error.message : String(error) });
+        sendJson(res, 503, { code: 'SCREEN_CAPTURE_FAILED', message: 'Phone screen preview is temporarily unavailable.' });
+      }
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/video') {
+      requireToken(req, url);
+      if (!session.videoStream) {
+        sendJson(res, 503, { code: 'VIDEO_UNAVAILABLE', message: 'Native scrcpy video is unavailable for this session.' });
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+      });
+      session.videoStream.addClient(res);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/state') {
       requireToken(req, url);
       lastPollAt = Date.now();
@@ -98,6 +171,7 @@ export async function startUiServer(options) {
         session: session.stats(),
         device,
         pointers: pointers.snapshot(),
+        mappingActive,
         lastSweep,
         lastProof: lastProof ? { ok: lastProof.ok, totalMs: lastProof.totalMs, sweep: lastProof.sweep } : null,
         log: logger.tail(60),
@@ -169,7 +243,7 @@ export async function startUiServer(options) {
         if (!name) {
           throw new AppError(ErrorCode.BAD_REQUEST, 'op=hold requires a pointer name');
         }
-        const point = holdPosition(device, name);
+        const point = holdPosition(screen, name);
         const pointer = pointers.down(name, body.x ?? point.x, body.y ?? point.y);
         return { pointer: { name, id: pointer.id, x: pointer.x, y: pointer.y } };
       }
@@ -198,7 +272,7 @@ export async function startUiServer(options) {
         try {
           const durationMs = clampNumber(body.durationMs, 200, 15000, 2000);
           lastProof = await runTwoPointerProof(pointers, {
-            screen: { width: device.width, height: device.height },
+            screen,
             sweepMs: durationMs,
             hz: config.messageHz,
             logger,
@@ -216,12 +290,122 @@ export async function startUiServer(options) {
         }
       }
       case 'panic': {
-        const released = await pointers.panic('ui-panic');
+        mappingActive = false;
+        cameraEnabled = false;
+        clearTriggerSources();
+        activeTaps.clear();
+        const released = mapping
+          ? await mapping.emergencyRelease('ui-panic')
+          : await pointers.panic('ui-panic');
         logger.info('panic handled', { released });
         return { released };
       }
+      case 'mapping-start': {
+        if (!mapping) throw new AppError(ErrorCode.BAD_REQUEST, 'Keyboard mapping is unavailable');
+        if (busy) throw new AppError(ErrorCode.BAD_REQUEST, 'A sequence is already running');
+        if (mappingActive) throw new AppError(ErrorCode.BAD_REQUEST, 'Keyboard mapping is already active');
+        const settings = mappingSettings(body);
+        mapping.setJoystickCenter({ x: settings.joystickX, y: settings.joystickY });
+        mapping.setJoystickRadius({ x: settings.joystickRadius, y: settings.joystickRadius });
+        mapping.setMouseAnchor({ x: settings.cameraX, y: settings.cameraY });
+        mapping.setSensitivity(settings.sensitivity);
+        mapping.mouseDown();
+        mappingActive = true;
+        mappingTargets = settings;
+        mappingBindings = settings.bindings;
+        mappingTaps = settings.tapBindings;
+        activeTaps.clear();
+        cameraEnabled = true;
+        clearTriggerSources();
+        logger.info('keyboard mapping started', settings);
+        return { mappingActive, settings };
+      }
+      case 'mapping-stop': {
+        mappingActive = false;
+        clearTriggerSources();
+        activeTaps.clear();
+        cameraEnabled = false;
+        const released = mapping
+          ? await mapping.emergencyRelease('mapping-stop')
+          : await pointers.panic('mapping-stop');
+        return { mappingActive, released };
+      }
+      case 'key-down':
+      case 'key-up': {
+        if (!mapping || !mappingActive) return { mappingActive: false };
+        const key = normalizeBindingKey(body.key);
+        const down = op === 'key-down';
+        if (down && mappingBindings.cameraToggle === key) {
+          cameraEnabled = !cameraEnabled;
+          if (cameraEnabled) mapping.mouseDown();
+          else mapping.mouseUp();
+        }
+        const movement = Object.entries(mappingBindings).find(([, binding]) => binding === key);
+        const directions = { forward: 'w', left: 'a', backward: 's', right: 'd' };
+        if (movement && directions[movement[0]]) {
+          if (down) mapping.keyDown(directions[movement[0]]);
+          else mapping.keyUp(directions[movement[0]]);
+        }
+        if (mappingBindings.fire === key) {
+          applyTrigger('shoot', `key:${key}`, down);
+        }
+        if (mappingBindings.scope === key) {
+          applyTrigger('scope', `key:${key}`, down);
+        }
+        const targets = mappingTaps.get(key) || [];
+        if (down && targets.length && !activeTaps.has(key)) {
+          const names = [];
+          for (let index = 0; index < targets.length; index++) {
+            const target = targets[index];
+            const name = `cfg-${key}-${index}`;
+            pointers.down(name, target.x * screen.width, target.y * screen.height);
+            names.push(name);
+          }
+          activeTaps.set(key, names);
+        } else if (!down && activeTaps.has(key)) {
+          for (const name of activeTaps.get(key)) {
+            if (pointers.active.has(name)) pointers.up(name);
+          }
+          activeTaps.delete(key);
+        }
+        return { mappingActive };
+      }
+      case 'camera-move': {
+        if (!mapping || !mappingActive) return { mappingActive: false };
+        mapping.mouseMove(finiteInput(body.dx, 'dx'), finiteInput(body.dy, 'dy'));
+        return { mappingActive };
+      }
+      case 'button-down':
+      case 'button-up': {
+        if (!mapping || !mappingActive) return { mappingActive: false };
+        const button = String(body.button ?? '');
+        const action = button === 'left' ? 'shoot' : button === 'right' ? 'scope' : null;
+        if (!action) throw new AppError(ErrorCode.BAD_REQUEST, 'Only left and right mouse buttons are mapped');
+        applyTrigger(action, `mouse:${button}`, op === 'button-down');
+        return { mappingActive };
+      }
       default:
         throw new AppError(ErrorCode.BAD_REQUEST, `Unknown op: ${op || '(none)'}`);
+    }
+  }
+
+  function clearTriggerSources() {
+    triggerSources.shoot.clear();
+    triggerSources.scope.clear();
+  }
+
+  function applyTrigger(action, source, down) {
+    const sources = triggerSources[action];
+    if (down) {
+      if (sources.has(source)) return;
+      const wasReleased = sources.size === 0;
+      sources.add(source);
+      if (wasReleased) {
+        const target = mappingTargets[action];
+        mapping[`${action}Down`](target.x * screen.width, target.y * screen.height);
+      }
+    } else if (sources.delete(source) && sources.size === 0) {
+      mapping[`${action}Up`]();
     }
   }
 
@@ -231,7 +415,7 @@ export async function startUiServer(options) {
    */ 
   function requireToken(req, url) {
     const header = req.headers['x-heaven-token'];
-    if (header !== token) {
+    if (header !== token && url.searchParams.get('t') !== token) {
       throw new AppError(ErrorCode.BAD_REQUEST, 'Missing or invalid UI token');
     }
   }
@@ -283,11 +467,11 @@ export async function startUiServer(options) {
  * @param {import('./device.js').DeviceInfo} device 
  * @param {string} name 
  */ 
-function holdPosition(device, name) {
+function holdPosition(screen, name) {
   const ratio = name.toUpperCase() === 'B' ? { x: 0.65, y: 0.45 } : { x: 0.35, y: 0.45 };
   return {
-    x: Math.round(device.width * ratio.x),
-    y: Math.round(device.height * ratio.y),
+    x: Math.round(screen.width * ratio.x),
+    y: Math.round(screen.height * ratio.y),
   };
 }
 
@@ -303,6 +487,84 @@ function clampNumber(value, min, max, fallback) {
     return fallback;
   }
   return Math.min(max, Math.max(min, Math.round(number)));
+}
+
+/** @param {Record<string, unknown>} body */
+function mappingSettings(body) {
+  const setting = (name, fallback) => {
+    const value = body[name] === undefined ? fallback : Number(body[name]);
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      throw new AppError(ErrorCode.BAD_REQUEST, `${name} must be between 0 and 1`);
+    }
+    return value;
+  };
+  const sensitivity = body.sensitivity === undefined ? 1 : Number(body.sensitivity);
+  if (!Number.isFinite(sensitivity) || sensitivity < 0 || sensitivity > 10) {
+    throw new AppError(ErrorCode.BAD_REQUEST, 'sensitivity must be between 0 and 10');
+  }
+  const bindings = {
+    forward: normalizeBindingKey(body.forwardKey ?? 'w'),
+    left: normalizeBindingKey(body.leftKey ?? 'a'),
+    backward: normalizeBindingKey(body.backwardKey ?? 's'),
+    right: normalizeBindingKey(body.rightKey ?? 'd'),
+    fire: body.fireKey === null || body.fireKey === '' ? null : normalizeBindingKey(body.fireKey ?? 'space'),
+    scope: body.scopeKey === null || body.scopeKey === '' ? null : normalizeBindingKey(body.scopeKey ?? 'shift'),
+  };
+  if (new Set(Object.values(bindings).filter(Boolean)).size !== Object.values(bindings).filter(Boolean).length) {
+    throw new AppError(ErrorCode.BAD_REQUEST, 'Each action must use a different key');
+  }
+  const tapBindings = new Map();
+  if (body.tapBindings !== undefined) {
+    if (!Array.isArray(body.tapBindings) || body.tapBindings.length > 64) {
+      throw new AppError(ErrorCode.BAD_REQUEST, 'tapBindings must contain at most 64 targets');
+    }
+    for (const raw of body.tapBindings) {
+      if (!raw || typeof raw !== 'object') throw new AppError(ErrorCode.BAD_REQUEST, 'Invalid tap binding');
+      const key = normalizeBindingKey(raw.key);
+      const x = Number(raw.x);
+      const y = Number(raw.y);
+      if (!Number.isFinite(x) || x < 0 || x > 1 || !Number.isFinite(y) || y < 0 || y > 1) {
+        throw new AppError(ErrorCode.BAD_REQUEST, 'Tap target coordinates must be between 0 and 1');
+      }
+      if (!tapBindings.has(key)) tapBindings.set(key, []);
+      tapBindings.get(key).push({ x, y, action: String(raw.action ?? key).slice(0, 80) });
+    }
+  }
+  return {
+    joystickX: setting('joystickX', 0.2),
+    joystickY: setting('joystickY', 0.8),
+    joystickRadius: setting('joystickRadius', 0.1),
+    cameraX: setting('cameraX', 0.5),
+    cameraY: setting('cameraY', 0.5),
+    sensitivity,
+    bindings: {
+      ...bindings,
+      cameraToggle: body.cameraToggleKey ? normalizeBindingKey(body.cameraToggleKey) : null,
+    },
+    tapBindings,
+    shoot: { x: setting('shootX', 0.85), y: setting('shootY', 0.8) },
+    scope: { x: setting('scopeX', 0.85), y: setting('scopeY', 0.65) },
+  };
+}
+
+/** @param {unknown} value */
+function normalizeBindingKey(value) {
+  let key = String(value ?? '').trim().toLowerCase();
+  if (key === ' ') key = 'space';
+  if (key === 'ctrl') key = 'control';
+  const allowed = /^[a-z0-9]$/.test(key)
+    || ['space', 'shift', 'control', 'alt', 'tab', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'wheelup', 'wheeldown'].includes(key);
+  if (!allowed) {
+    throw new AppError(ErrorCode.BAD_REQUEST, 'Use a letter, number, Space, Shift, Control, Alt, Tab, or arrow key. Escape is reserved.');
+  }
+  return key;
+}
+
+/** @param {unknown} value @param {string} name */
+function finiteInput(value, name) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new AppError(ErrorCode.BAD_REQUEST, `${name} must be a finite number`);
+  return number;
 }
 
 /** 
