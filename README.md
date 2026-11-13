@@ -1,23 +1,50 @@
-# HEAVEN-MOBILE-CONTROL — Phase 2: multi-touch proof of concept
+# HEAVEN-MOBILE-CONTROL — Phase 3A: keyboard and mouse control
 
-A minimal, experimental Windows application that injects **two independent,
-simultaneous touch pointers** into an unrooted Samsung phone over a **USB cable
-only**, using the scrcpy 4.1 server as the injection transport.
+A Windows controller that maps keyboard and mouse input to touch pointers on an
+Android phone over a **USB cable only**, using the scrcpy 4.1 server as the
+injection transport. The loopback controller page receives the input and shows
+the live phone screen and touch positions; keyboard/mouse mapping is active
+only while that page has pointer lock. The preview uses scrcpy's native H.264
+video stream at native resolution (90 fps ceiling, 40 Mbps), while touch input
+uses the separate low-latency scrcpy control socket.
 
 No root. No Shizuku. No Wi-Fi. No `/dev/input`. No minitouch. No `adb shell input`
-per movement. No modifications to Free Fire MAX or to Android settings.
+per movement. No modifications to Free Fire MAX.
 
-This is a proof of concept, not a keymapper. It answers one question: *can we
-hold one pointer down while another moves, reliably, with free software and a
-stock phone?* The answer, measured on the target hardware, is **yes**.
+The underlying USB multi-touch transport has been physically verified on the
+target hardware. The new keyboard and mouse mapping flow is implemented in the
+controller page and still needs hardware validation.
 
 ---
 
 ## 1. What was physically verified
 
+### Start the controller
+
+1. Connect the Android phone by USB and enable USB debugging.
+2. Install the scrcpy 4.1 server and Android platform tools, or pass their paths
+   with `--server-jar` and `--adb`.
+3. Run `npm run live`. The controller opens in your browser.
+4. Configure the touch locations to match the game's on-screen controls, then
+   select each key field and press the key you want to assign. Select **Start
+   mapping**. The page captures the mouse; the assigned keys move, fire, and
+   scope, while mouse movement aims and left/right click remain available.
+   Press **Q** to stop
+   mapping or **Escape** to release all active touches.
+
+You can exercise the UI without a phone with `node src/main.js --live --mock`.
+The mock mode records touch events but does not send them to a device.
+
+Run `npm run build` for the source check and `npm test` for the automated
+regression suite.
+
 Target: **Samsung SM-S721B (Galaxy S24 FE), Android 16, SDK 36, 1080×2340**,
-connected by USB to Windows 10. Each claim below had a real device run; the
-screenshots are in `artifacts/`.
+connected by USB to Windows 10. The UI decodes the phone's H.264 stream at full
+display resolution and shows the actual decoded frame rate. It requests up to
+90 fps; the delivered rate depends on the phone display mode, the game's own
+frame-rate setting, and the browser decoder. Touch injection shares the same
+scrcpy session on its separate control socket. The phone must use High/Adaptive
+Motion Smoothness and the game must produce 90 fps to reach the target.
 
 | Claim | How it was proven | Evidence |
 |---|---|---|
@@ -173,7 +200,7 @@ problem · `4` protocol/pointer state violation.
 
 ---
 
-## 5. The test interface
+## 5. The controller interface
 
 `node src/main.js` starts a loopback-only panel (`http://127.0.0.1:7373/?t=<token>`):
 
@@ -232,13 +259,16 @@ auth; 120 Hz move stream.
 | Landscape / rotated apps | coordinates are sent in natural-orientation device pixels; rotation is detected and warned about, never compensated |
 | Other phones, other Android versions, One UI variants | not tested; only SM-S721B / Android 16 / SDK 36 |
 | `--mock` mode | by construction cannot prove anything about the real pipeline |
+| WASD joystick and mouse camera mapping | implemented in the loopback controller; requires the controller page to hold mouse pointer lock |
+| Fire and scope mouse buttons | configurable touch locations; implemented in the loopback controller |
 
 ### Explicitly unsupported in this PoC
 
-Root, Shizuku, minitouch, `/dev/input`, AOA/HID, Wi-Fi/LAN transport, video or
-audio streams, keyboard/mouse-to-touch mapping, camera drag, joystick zones,
-per-app profiles, global hotkeys, >10 pointers, virtual/secondary displays, and
-any form of anti-cheat evasion. **Game compatibility is unproven** — Phase 1
+Root, Shizuku, minitouch, `/dev/input`, AOA/HID, Wi-Fi/LAN transport, scrcpy
+video/audio streaming, per-app profiles, global hotkeys, >10 pointers,
+virtual/secondary displays, and any form of anti-cheat evasion. The app does
+not capture input globally or inject keyboard/mouse events into other Windows
+apps. **Game compatibility is unproven** — Phase 1
 gate T4 (does Free Fire MAX accept injected touches) is still open, and this PoC
 was deliberately not pointed at the game.
 
@@ -260,7 +290,7 @@ src/ui-server.js       loopback HTTP bridge, token auth, watchdog
 src/ui-page.js         the panel (single HTML document, no build step)
 src/mock-session.js    verification harness transport (no device)
 tools/verify-multitouch.js  serves a touch visualiser to the phone + screenshots
-test/                  node:test suites (protocol, pointers, sequences, UI)
+test/                  node:test suites (55 declared tests across six suites)
 artifacts/             screenshots and JSON evidence from the hardware runs
 ```
 

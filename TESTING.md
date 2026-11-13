@@ -32,7 +32,7 @@ cd /d C:\Users\ashwi\Desktop\HEAVEN-MOBILE-CONTROL
 node --test
 ```
 
-Expected: `pass 25`, `fail 0`.
+Expected: `pass 55`, `fail 0` (55 top-level tests across six suites).
 
 What each suite covers:
 
@@ -42,6 +42,12 @@ What each suite covers:
 | `test/pointers.test.js` | two pointers get distinct ids; moving B never re-sends A; lifting B leaves A down; panic emits exactly N `ACTION_UP` and no cancel; panic is idempotent; moving/lifting an unpressed id throws; the 10-pointer ceiling; coordinate clamping; a closed channel throws instead of silently dropping |
 | `test/sequences.test.js` | the proof sequence leaves one pointer with `down=1 move=0 up=1` (never re-sent) and one with `move>0`; sweep refuses an unpressed pointer; sweep stays inside the screen |
 | `test/ui.test.js` | the page needs the token; `/api/state` and `/api/input` need the token; a DOWN/MOVE/panic over HTTP really reaches the transport; conflicting ops return 409; cross-origin 403 |
+| `test/device-transport.test.js` | USB/TCP/emulator classification, USB-only selection, and rejection of TCP, emulator, and unknown devices |
+| `test/mapping-engine.test.js` | WASD joystick lifecycle and direction, diagonal normalization, camera lifecycle and sensitivity, edge rebasing, pointer independence, and awaitable emergency cleanup |
+
+The live controller preview uses scrcpy's H.264 video socket at native display
+resolution, capped at 90 fps. Older browsers without WebCodecs fall back to ADB
+screenshots, which are substantially slower.
 
 Note: the mock transport is a *test double*. These tests say nothing about the
 phone, which is why §2–§4 exist.

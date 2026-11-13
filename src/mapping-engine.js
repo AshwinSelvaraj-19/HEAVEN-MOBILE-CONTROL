@@ -128,6 +128,58 @@ export class MappingEngine {
    * Returns true if the given key is one of the four movement keys.
    * @private
    */
+
+  /**
+   * Start the shoot pointer via PointerManager.
+   * @param {number} x - X coordinate (pixels)
+   * @param {number} y - Y coordinate (pixels)
+   */
+  shootDown(x, y) {
+    try {
+      this.pm.down('shoot', x, y);
+    } catch (e) {
+      this.loggerWarn('shootDown', e);
+    }
+  }
+
+  /**
+   * Release the shoot pointer via PointerManager.
+   */
+  shootUp() {
+    if (this.pm.active.has('shoot')) {
+      try {
+        this.pm.up('shoot');
+      } catch (e) {
+        this.loggerWarn('shootUp', e);
+      }
+    }
+  }
+
+  /**
+   * Start the scope pointer via PointerManager.
+   * @param {number} x - X coordinate (pixels)
+   * @param {number} y - Y coordinate (pixels)
+   */
+  scopeDown(x, y) {
+    try {
+      this.pm.down('scope', x, y);
+    } catch (e) {
+      this.loggerWarn('scopeDown', e);
+    }
+  }
+
+  /**
+   * Release the scope pointer via PointerManager.
+   */
+  scopeUp() {
+    if (this.pm.active.has('scope')) {
+      try {
+        this.pm.up('scope');
+      } catch (e) {
+        this.loggerWarn('scopeUp', e);
+      }
+    }
+  }
   _isMovementKey(key) {
     return key === 'w' || key === 'a' || key === 's' || key === 'd';
   }
@@ -311,14 +363,13 @@ export class MappingEngine {
     const actualDeltaX = this.mouseAnchor.x - oldAnchorX;
     const actualDeltaY = this.mouseAnchor.y - oldAnchorY;
     
-    // Adjust delta by the negative of the actual anchor displacement.
-    // Guard against division by zero when sensitivity is zero.
+    // Rebase the accumulated relative movement at an edge. Keeping the old
+    // delta while moving the anchor would preserve the out-of-bounds absolute
+    // coordinate and pin the pointer to the edge. Reset only the crossed axis
+    // so the next relative event continues from the new anchor.
     if (this.mouseSensitivity > 0) {
-      this.mouseDelta.x -= actualDeltaX * this.screen.width / this.mouseSensitivity;
-      this.mouseDelta.y -= actualDeltaY * this.screen.height / this.mouseSensitivity;
-    } else {
-      // Zero sensitivity: pointer stays at clamped position, delta unchanged.
-      // No NaN/Infinity will be produced.
+      if (actualDeltaX !== 0) this.mouseDelta.x = 0;
+      if (actualDeltaY !== 0) this.mouseDelta.y = 0;
     }
     // Use clamped position for pointer (guaranteed within screen bounds)
     const cx = xClamped;
@@ -419,26 +470,26 @@ export class MappingEngine {
    * - Cancels local tracking of pointers after emergency release.
    * @param {string} [reason] - optional label for the panic log
    */
-  emergencyRelease(reason) {
+  async emergencyRelease(reason) {
     // PointerManager.panic() handles N × ACTION_UP and session flush.
+    let released = 0;
     try {
-      this.pm.panic(reason ?? 'emergency-release');
+      released = await this.pm.panic(reason ?? 'emergency-release');
     } catch (e) {
       this.loggerWarn('emergencyRelease panic', e);
+    } finally {
+      // Clean up local state regardless of remote outcome.
+      this.wasdPressed = false;
+      this.joystickPointerDown = false;
+      this.cameraPointerDown = false;
+      this.mousePressed = false;
+      this.mouseDelta = { x: 0, y: 0 };
+      this.keyState.w = false;
+      this.keyState.a = false;
+      this.keyState.s = false;
+      this.keyState.d = false;
     }
-
-    // Clean up our internal state regardless of remote outcome.
-    this.wasdPressed = false;
-    this.joystickPointerDown = false;
-    this.cameraPointerDown = false;
-    this.mousePressed = false;
-    this.mouseDelta = { x: 0, y: 0 };
-    // Reset all four movement key states
-    this.keyState.w = false;
-    this.keyState.a = false;
-    this.keyState.s = false;
-    this.keyState.d = false;
-
+    return released;
   }
 
 

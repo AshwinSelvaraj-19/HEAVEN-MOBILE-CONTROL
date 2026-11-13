@@ -9,9 +9,8 @@
  *   server/.../DesktopConnection  socket name scrcpy_%08x, tunnel_forward path
  *   server/.../Options.java       unknown keys only warn
  *
- * Control-only mode (video=false audio=false control=true) is explicitly
- * supported by the server: Controller.getEventPointAndDisplayId() falls back to
- * raw coordinates when no video display data exists.
+ * The interactive controller enables scrcpy's native H.264 video socket;
+ * proof and headless modes remain control-only.
  */
 
 import crypto from 'node:crypto';
@@ -19,6 +18,7 @@ import net from 'node:net';
 import { ControlChannel, delay } from './control-channel.js';
 import { AppError, ErrorCode } from './errors.js';
 import { SCRCPY_VERSION, SERVER_JAR_REMOTE } from './config.js';
+import { ScrcpyVideoStream } from './scrcpy-video.js';
 
 export class ScrcpySession {
   /**
@@ -30,6 +30,9 @@ export class ScrcpySession {
    * @param {string} options.serverJarPath
    * @param {boolean} [options.allowPowerOn]
    * @param {number} [options.startTimeoutMs]
+   * @param {boolean} [options.video] Show video stream (default: false)
+   * @param {boolean} [options.audio] Show audio stream (default: false)
+   * @param {boolean} [options.control] Control-only mode (default: true)
    */
   constructor(options) {
     this.adb = options.adb;
@@ -39,9 +42,17 @@ export class ScrcpySession {
     this.serverJarPath = options.serverJarPath;
     this.allowPowerOn = options.allowPowerOn ?? false;
     this.startTimeoutMs = options.startTimeoutMs ?? 20000;
+    this.video = options.video !== undefined ? options.video : false;
+    this.maxFps = options.maxFps ?? 90;
+    this.videoBitRate = options.videoBitRate ?? 20000000;
+    this.videoMaxSize = options.videoMaxSize ?? 2400;
+    this.audio = options.audio !== undefined ? options.audio : false;
+    this.control = options.control !== undefined ? options.control : true;
 
     /** @type {ControlChannel | null} */
     this.channel = null;
+    this.videoSocket = null;
+    this.videoStream = null;
     /** @type {import('node:child_process').ChildProcess | null} */
     this.child = null;
     /** @type {Promise<{code: number|null, signal: string|null}> | null} */
@@ -91,6 +102,12 @@ export class ScrcpySession {
 
     await this.#waitForServerReady();
 
+    if (this.video) {
+      this.videoSocket = await connectRawSocket('127.0.0.1', this.port, 12000);
+      this.videoStream = new ScrcpyVideoStream(this.videoSocket, this.logger);
+      this.logger.info('scrcpy video channel connected', { port: this.port, maxFps: this.maxFps });
+    }
+
     this.channel = await ControlChannel.connect({
       host: '127.0.0.1',
       port: this.port,
@@ -128,6 +145,9 @@ export class ScrcpySession {
     if (this.channel) {
       await this.channel.close().catch(() => undefined);
     }
+    this.videoStream?.close();
+    this.videoStream = null;
+    this.videoSocket = null;
 
     if (this.child && this.exitPromise) {
       const exited = await Promise.race([
@@ -168,6 +188,14 @@ export class ScrcpySession {
   }
 
   #executeServer() {
+    this.logger.info('starting scrcpy server channels', {
+      video: this.video,
+      audio: this.audio,
+      control: this.control,
+      maxFps: this.maxFps,
+      videoBitRate: this.videoBitRate,
+      videoMaxSize: this.videoMaxSize,
+    });
     const args = [
       `CLASSPATH=${SERVER_JAR_REMOTE}`,
       'app_process',
@@ -175,10 +203,10 @@ export class ScrcpySession {
       'com.genymobile.scrcpy.Server',
       SCRCPY_VERSION,
       `scid=${this.scid.toString(16).padStart(8, '0')}`,
-      `log_level=${this.logger.level === 'debug' ? 'debug' : 'info'}`,
-      'video=false',
-      'audio=false',
-      'control=true',
+      `log_level=${this.video || this.logger.level === 'debug' ? 'debug' : 'info'}`,
+      `video=${this.video ? 'true' : 'false'}`,
+      `audio=${this.audio ? 'true' : 'false'}`,
+      `control=${this.control ? 'true' : 'false'}`,
       // The server listens; adb forward connects into the abstract socket.
       'tunnel_forward=true',
       // Keep the control socket one-directional and free of handshake bytes.
@@ -188,6 +216,7 @@ export class ScrcpySession {
       // Do not press POWER by default (no state-changing input without opt-in).
       `power_on=${this.allowPowerOn ? 'true' : 'false'}`,
       'cleanup=true',
+      ...(this.video ? [`max_fps=${this.maxFps}`, `video_bit_rate=${this.videoBitRate}`, `max_size=${this.videoMaxSize}`, 'video_codec=h264'] : []),
     ];
 
     const { child, exit } = this.adb.spawnShell(args, {
@@ -221,7 +250,11 @@ export class ScrcpySession {
     if (this.serverLines.length > 200) {
       this.serverLines.shift();
     }
-    const level = /^(ERROR|E\/)/.test(trimmed) || stream === 'err' ? 'warn' : 'debug';
+    const level = /^(ERROR|E\/)/.test(trimmed) || stream === 'err'
+      ? 'warn'
+      : this.video && /(?:encoder|video|bit.?rate|fps|capture|display size)/i.test(trimmed)
+        ? 'info'
+        : 'debug';
     this.logger.write(level, 'scrcpy-server', { line: trimmed, stream });
   }
 
@@ -262,6 +295,51 @@ export class ScrcpySession {
       handler(error);
     }
   }
+}
+
+/** @param {string} host @param {number} port @param {number} timeoutMs */
+async function connectRawSocket(host, port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const socket = net.createConnection({ host, port });
+        const timer = setTimeout(() => socket.destroy(new Error('video socket connection timed out')), 1200);
+        let connected = false;
+        let closedEarly = false;
+        socket.once('connect', () => {
+          connected = true;
+          clearTimeout(timer);
+          socket.setNoDelay(true);
+          socket.once('close', () => { closedEarly = true; });
+          setTimeout(() => {
+            if (closedEarly || socket.destroyed) {
+              reject(new Error('scrcpy video socket closed before the stream became ready'));
+            } else {
+              resolve(socket);
+            }
+          }, 150);
+        });
+        socket.once('error', (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        socket.once('close', () => {
+          if (!connected) {
+            clearTimeout(timer);
+            reject(new Error('scrcpy video socket closed during connection'));
+          }
+        });
+      });
+    } catch (error) {
+      lastError = error;
+      await delay(120);
+    }
+  }
+  throw new AppError(ErrorCode.SESSION_START, 'Could not connect to the scrcpy video socket', {
+    hint: lastError instanceof Error ? lastError.message : undefined,
+  });
 }
 
 /**

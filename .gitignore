@@ -6,3 +6,11 @@ logs/
 .research/
 
 node_modules/
+
+# native addon build output
+build/
+WindowCreator/bin/
+WindowCreator/obj/
+
+# tooling markers
+.freebuff/

@@ -7,7 +7,7 @@
  *   protocol.js   wire format of INJECT_TOUCH_EVENT (verified against v4.1)
  *   pointers.js   the invariant-preserving multi-pointer state machine
  *   sequences.js  the deterministic two-pointer proof
- *   ui-server.js  the loopback test interface
+ *   ui-server.js  the loopback controller
  */
 
 import process from 'node:process';
@@ -16,6 +16,8 @@ import { HELP, parseArgs, SCRCPY_VERSION } from './config.js';
 import { readDeviceInfo, selectDevice } from './device.js';
 import { AppError, ErrorCode, asAppError } from './errors.js';
 import { Logger } from './log.js';
+import { MappingEngine } from './mapping-engine.js';
+import { ScreenCapture } from './screen-capture.js';
 import { PointerManager } from './pointers.js';
 import { ScrcpySession } from './session.js';
 import { MockSession } from './mock-session.js';
@@ -47,6 +49,10 @@ async function main() {
   let session = null;
   /** @type {PointerManager | null} */
   let pointers = null;
+  /** @type {MappingEngine | null} */
+  let mapping = null;
+  /** @type {ScreenCapture | null} */
+  let screenCapture = null;
   let shuttingDown = false;
 
   const shutdown = async (reason, exitCode = EXIT.OK) => {
@@ -60,6 +66,7 @@ async function main() {
         await pointers.panic(reason);
       }
     } finally {
+      screenCapture?.stop();
       if (session) {
         await session.stop().catch((error) => {
           logger.warn('session stop failed', { message: error instanceof Error ? error.message : String(error) });
@@ -205,6 +212,11 @@ async function main() {
         logger,
         serverJarPath: toolchain.serverJarPath,
         allowPowerOn: config.allowPowerOn,
+        // Use scrcpy's native hardware-encoded stream for the interactive UI.
+        video: !config.mock && config.ui,
+        maxFps: 90,
+        videoBitRate: 40000000,
+        videoMaxSize: 2400,
       });
 
       session.onLost((error) => {
@@ -216,8 +228,12 @@ async function main() {
     const sessionInfo = await session.start();
     logger.info('session established', sessionInfo);
 
-    pointers = new PointerManager({ session, screen: { width: device.width, height: device.height }, logger });
+    const screen = { width: device.width, height: device.height };
+    pointers = new PointerManager({ session, screen, logger });
     pointers.onEvent((name, action, x, y) => logger.debug('pointer', { name, action, x, y }));
+    mapping = new MappingEngine(pointers, screen, {
+      mouseSensitivity: config.mouseSensitivity ?? 1,
+    });
 
     if (config.mode === 'selftest') {
       logger.info('selftest: single tap at screen centre');
@@ -258,11 +274,23 @@ async function main() {
       return report.ok ? EXIT.OK : EXIT.PROTOCOL;
     }
 
-    // Interactive mode: loopback UI.
+    // Keep a headless session alive when requested.
+    if (!config.ui) {
+      process.stdout.write('\n  USB session ready. Press Ctrl+C to release all touches and exit.\n\n');
+      await new Promise(() => undefined);
+      return EXIT.OK;
+    }
+
+    // Interactive mode: loopback controller UI.
     const { startUiServer } = await import('./ui-server.js');
-    const ui = await startUiServer({ config, logger, session, pointers, device, mock: config.mock });
+    screenCapture = config.mock ? null : new ScreenCapture({
+      adbPath: toolchain.adbPath,
+      serial: device.serial,
+      logger,
+    });
+    const ui = await startUiServer({ config, logger, session, pointers, mapping, screenCapture, device, mock: config.mock });
     logger.info('UI ready', { url: ui.url });
-    process.stdout.write(`\n  Test interface: ${ui.url}\n  Press Ctrl+C to release all pointers and exit.\n\n`);
+    process.stdout.write(`\n  Controller: ${ui.url}\n  Press Ctrl+C to release all touches and exit.\n\n`);
 
     if (config.openBrowser) {
       await ui.openBrowser();
