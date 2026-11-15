@@ -139,6 +139,7 @@ function assertFile(file, label, code) {
  * @property {number} keepHeldMs
  * @property {boolean} allowPowerOn
  * @property {boolean} mock
+ * @property {boolean} wake
  */
 
 /**
@@ -201,6 +202,7 @@ export function parseArgs(argv, base = {}) {
     keepHeldMs: num(flags['keep-held'], base.keepHeldMs ?? 0),
     allowPowerOn: Boolean(flags['allow-power-on']),
     mouseSensitivity: nonNegative(flags['mouse-sensitivity'], base.mouseSensitivity ?? 1.0),
+    wake: flags['no-wake'] ? false : (flags.wake !== undefined ? Boolean(flags.wake) : (mode === 'ui' || mode === 'live')),
     mock: Boolean(flags.mock) || base.mock === true,
   };
 
@@ -228,6 +230,7 @@ function defaults(base) {
     sweepMs: 2000,
     keepHeldMs: 0,
     allowPowerOn: false,
+    wake: true,
     mock: false,
     ...base,
   };
@@ -263,6 +266,8 @@ Options:
   --keep-held <ms>  After the proof, hold both pointers this long (visual check)
   --mouse-sensitivity <n>  Initial camera sensitivity (default 1.0)
   --allow-power-on  Permit the server to press POWER if the screen is off
+  --wake            Wake the phone screen before starting live video (default in UI/live mode)
+  --no-wake         Do not wake the phone screen automatically
   --mock            Verification harness: no device, messages are counted only
   --log-file <p>    JSONL log path (default logs/heaven-poc-<stamp>.jsonl)
   --verbose         Debug logging

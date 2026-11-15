@@ -19,6 +19,7 @@ import { ControlChannel, delay } from './control-channel.js';
 import { AppError, ErrorCode } from './errors.js';
 import { SCRCPY_VERSION, SERVER_JAR_REMOTE } from './config.js';
 import { ScrcpyVideoStream } from './scrcpy-video.js';
+import { ScrcpyAudioStream } from './scrcpy-audio.js';
 
 export class ScrcpySession {
   /**
@@ -53,6 +54,8 @@ export class ScrcpySession {
     this.channel = null;
     this.videoSocket = null;
     this.videoStream = null;
+    this.audioSocket = null;
+    this.audioStream = null;
     /** @type {import('node:child_process').ChildProcess | null} */
     this.child = null;
     /** @type {Promise<{code: number|null, signal: string|null}> | null} */
@@ -64,6 +67,10 @@ export class ScrcpySession {
     this.serverLines = [];
     this.stopping = false;
     this.exited = false;
+    this.videoRetryCount = 0;
+    this.screenWake = null;
+    this.keyframeWatchdog = null;
+    this.videoRetrying = false;
 
     /** @type {((error: Error) => void)[]} */
     this.lostHandlers = [];
@@ -106,6 +113,12 @@ export class ScrcpySession {
       this.videoSocket = await connectRawSocket('127.0.0.1', this.port, 12000);
       this.videoStream = new ScrcpyVideoStream(this.videoSocket, this.logger);
       this.logger.info('scrcpy video channel connected', { port: this.port, maxFps: this.maxFps });
+      this.#startKeyframeWatchdog();
+    }
+    if (this.audio) {
+      this.audioSocket = await connectRawSocket('127.0.0.1', this.port, 12000);
+      this.audioStream = new ScrcpyAudioStream(this.audioSocket, this.logger);
+      this.logger.info('scrcpy audio channel connected', { port: this.port });
     }
 
     this.channel = await ControlChannel.connect({
@@ -117,7 +130,7 @@ export class ScrcpySession {
     this.channel.onClose((error) => this.#onLost(error));
 
     this.startedAt = Date.now();
-    this.logger.info('session ready', { setupMs: this.startedAt - started });
+    this.logger.info('session ready', { setupMs: this.startedAt - started, audio: Boolean(this.audioStream) });
     return { port: this.port, scid: scidHex, socketName: this.socketName, startMs: this.startedAt - started };
   }
 
@@ -141,10 +154,14 @@ export class ScrcpySession {
       return;
     }
     this.stopping = true;
+    this.#clearKeyframeWatchdog();
 
     if (this.channel) {
       await this.channel.close().catch(() => undefined);
     }
+    this.audioStream?.close();
+    this.audioStream = null;
+    this.audioSocket = null;
     this.videoStream?.close();
     this.videoStream = null;
     this.videoSocket = null;
@@ -176,7 +193,13 @@ export class ScrcpySession {
       port: this.port,
       socketName: this.socketName,
       serverLines: this.serverLines.length,
+      screenWake: this.screenWake,
+      videoRetryCount: this.videoRetryCount,
+      lastServerError: this.lastServerErrorLine(),
       channel: this.channel?.stats() ?? null,
+      video: this.videoStream ? this.videoStream.stats() : null,
+      audio: this.audioStream ? this.audioStream.stats() : { audioConnected: false, audioPacketsReceived: 0, lastAudioPacketAt: null, audioCodec: null, audioCodecConfigured: false, lastAudioError: null },
+      audioEnabled: Boolean(this.audio),
     };
   }
 
@@ -275,7 +298,6 @@ export class ScrcpySession {
 
     if (!ready) {
       const detail = this.serverLines.slice(-10).join(' | ');
-      await this.stop().catch(() => undefined);
       throw new AppError(ErrorCode.SESSION_START, 'scrcpy-server did not start', {
         hint: detail
           ? `Server output: ${detail}`
@@ -288,11 +310,145 @@ export class ScrcpySession {
 
   /** @param {Error} error */
   #onLost(error) {
-    if (this.stopping) {
+    if (this.stopping || this.videoRetrying) {
       return;
     }
     for (const handler of this.lostHandlers) {
       handler(error);
+    }
+  }
+
+  /** @returns {string | null} */
+  lastServerErrorLine() {
+    for (let i = this.serverLines.length - 1; i >= 0; i--) {
+      const line = this.serverLines[i];
+      if (/^(ERROR|E\/)/.test(line) || line.includes('[server] ERROR')) return line;
+    }
+    return this.serverLines.at(-1) ?? null;
+  }
+
+  #clearKeyframeWatchdog() {
+    if (this.keyframeWatchdog) {
+      clearTimeout(this.keyframeWatchdog);
+      this.keyframeWatchdog = null;
+    }
+  }
+
+  /** Start a 3-second watchdog: if no keyframe arrives, restart video at lower settings. */
+  #startKeyframeWatchdog() {
+    this.#clearKeyframeWatchdog();
+    if (!this.video) return;
+    this.keyframeWatchdog = setTimeout(() => { void this.#handleKeyframeTimeout(); }, 3000);
+  }
+
+  async #handleKeyframeTimeout() {
+    this.keyframeWatchdog = null;
+    if (this.exited || this.stopping) return;
+    if (this.videoStream && this.videoStream.keyframeReceived) return;
+    if (this.videoRetryCount >= 2) {
+      const message = `No H.264 keyframe after ${this.videoRetryCount} encoder fallback attempts`;
+      this.logger.warn('video encoder fallback exhausted', {
+        maxFps: this.maxFps,
+        videoBitRate: this.videoBitRate,
+        videoMaxSize: this.videoMaxSize,
+      });
+      if (this.videoStream) this.videoStream.lastError = this.videoStream.lastError ?? message;
+      return;
+    }
+    this.videoRetryCount++;
+    const next = this.videoRetryCount === 1
+      ? { maxFps: 60, videoBitRate: 8000000, videoMaxSize: 1080 }
+      : { maxFps: 30, videoBitRate: 8000000, videoMaxSize: 1080 };
+    this.logger.info('video encoder fallback retry', {
+      attempt: this.videoRetryCount,
+      maxFps: next.maxFps,
+      videoBitRate: next.videoBitRate,
+      videoMaxSize: next.videoMaxSize,
+    });
+    await this.#restartVideoChannels(next.maxFps, next.videoBitRate, next.videoMaxSize);
+  }
+
+  /** Restart session with updated audio flag (requires server restart: audio socket is negotiated at start). */
+  async restartWithAudio(enabled) {
+    if (Boolean(this.audio) === Boolean(enabled)) {
+      return { restarted: false, audio: Boolean(this.audio) };
+    }
+    this.audio = Boolean(enabled);
+    await this.#restartVideoChannels(this.maxFps, this.videoBitRate, this.videoMaxSize);
+    return { restarted: true, audio: Boolean(this.audio) };
+  }
+
+  async #restartVideoChannels(maxFps, videoBitRate, videoMaxSize) {
+    if (this.videoRetrying) return;
+    this.videoRetrying = true;
+    this.#clearKeyframeWatchdog();
+    const previousStopping = this.stopping;
+    this.stopping = true;
+    try {
+      this.audioStream?.close();
+      this.audioStream = null;
+      this.audioSocket = null;
+      this.videoStream?.close();
+      if (this.channel) await this.channel.close().catch(() => undefined);
+      this.channel = null;
+      this.videoStream = null;
+      this.videoSocket = null;
+      if (this.child && this.exitPromise) {
+        const exited = await Promise.race([
+          this.exitPromise.then(() => true),
+          delay(800).then(() => false),
+        ]);
+        if (!exited) {
+          this.logger.warn('server did not exit before video retry; terminating adb shell');
+          this.child.kill();
+          await Promise.race([this.exitPromise, delay(800)]);
+        }
+      }
+      await this.adb.removeForward(this.port, { serial: this.serial }).catch(() => undefined);
+      this.child = null;
+      this.exitPromise = null;
+      this.exited = false;
+      this.maxFps = maxFps;
+      this.videoBitRate = videoBitRate;
+      this.videoMaxSize = videoMaxSize;
+      this.port = await findFreePort();
+      this.scid = crypto.randomInt(1, 0x7fffffff);
+      const scidHex = this.scid.toString(16).padStart(8, '0');
+      this.socketName = `scrcpy_${scidHex}`;
+      this.logger.info('session restarting for encoder fallback', {
+        serial: this.serial,
+        port: this.port,
+        scid: scidHex,
+        socket: this.socketName,
+      });
+      await this.adb.removeForward(this.port, { serial: this.serial });
+      await this.adb.forward(this.port, this.socketName, { serial: this.serial });
+      this.#executeServer();
+      await this.#waitForServerReady();
+      this.videoSocket = await connectRawSocket('127.0.0.1', this.port, 12000);
+      this.videoStream = new ScrcpyVideoStream(this.videoSocket, this.logger);
+      this.logger.info('scrcpy video channel connected', { port: this.port, maxFps: this.maxFps });
+      this.#startKeyframeWatchdog();
+      if (this.audio) {
+        this.audioSocket = await connectRawSocket('127.0.0.1', this.port, 12000);
+        this.audioStream = new ScrcpyAudioStream(this.audioSocket, this.logger);
+        this.logger.info('scrcpy audio channel connected', { port: this.port });
+      }
+      this.channel = await ControlChannel.connect({
+        host: '127.0.0.1',
+        port: this.port,
+        logger: this.logger,
+        timeoutMs: 12000,
+      });
+      this.channel.onClose((error) => this.#onLost(error));
+      this.stopping = previousStopping && false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('video encoder fallback restart failed', { message });
+      if (this.videoStream) this.videoStream.lastError = message;
+      this.stopping = previousStopping;
+    } finally {
+      this.videoRetrying = false;
     }
   }
 }

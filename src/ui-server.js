@@ -42,6 +42,7 @@ export async function startUiServer(options) {
   const screen = pointers.screen;
   const token = crypto.randomBytes(18).toString('hex');
   const mock = options.mock ?? false;
+  const screenWake = options.screenWake ?? session.screenWake ?? null;
 
   let lastSweep = null;
   let lastProof = null;
@@ -65,6 +66,7 @@ export async function startUiServer(options) {
     screenAvailable: Boolean(screenCapture),
     videoAvailable: Boolean(session.videoStream),
     mouseSensitivity: config.mouseSensitivity ?? 1,
+    screenWake,
   });
 
   session.videoStream?.onDisplaySize(async (width, height) => {
@@ -163,19 +165,73 @@ export async function startUiServer(options) {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/audio') {
+      requireToken(req, url);
+      if (mock) {
+        sendJson(res, 503, { code: 'AUDIO_UNAVAILABLE', message: 'Audio is not available in mock mode.' });
+        return;
+      }
+      if (!session.audioStream) {
+        sendJson(res, 503, { code: 'AUDIO_UNAVAILABLE', message: 'Audio stream is unavailable for this session.' });
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'application/octet-stream',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+      });
+      session.audioStream.addClient(res);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/state') {
       requireToken(req, url);
       lastPollAt = Date.now();
+      const sessionStats = session.stats();
+      const videoStats = session.videoStream ? session.videoStream.stats() : (sessionStats.video ?? null);
+      const audioStats = session.audioStream ? session.audioStream.stats() : (sessionStats.audio ?? { audioConnected: false, audioPacketsReceived: 0, lastAudioPacketAt: null, audioCodec: null, audioCodecConfigured: false, lastAudioError: null });
+      const lastServerError = sessionStats.lastServerError ?? (typeof session.lastServerErrorLine === 'function' ? session.lastServerErrorLine() : null);
       sendJson(res, 200, {
         mock,
-        session: session.stats(),
+        session: sessionStats,
         device,
         pointers: pointers.snapshot(),
         mappingActive,
+        screenWake: screenWake ?? session.screenWake ?? null,
         lastSweep,
         lastProof: lastProof ? { ok: lastProof.ok, totalMs: lastProof.totalMs, sweep: lastProof.sweep } : null,
+        video: videoStats ? { ...videoStats, lastServerError } : { videoConnected: false, videoFramesReceived: 0, lastVideoFrameAt: null, codecConfigured: false, keyframeReceived: false, lastVideoError: null, lastServerError },
+        audio: { ...audioStats, audioEnabled: Boolean(sessionStats.audioEnabled ?? (session.audio !== undefined ? session.audio : false)) },
+        lastServerError,
         log: logger.tail(60),
       });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/audio/restart') {
+      requireToken(req, url);
+      if (mock) {
+        sendJson(res, 503, { code: 'AUDIO_UNAVAILABLE', message: 'Audio is not available in mock mode.' });
+        return;
+      }
+      if (typeof session.restartWithAudio !== 'function') {
+        sendJson(res, 503, { code: 'AUDIO_UNAVAILABLE', message: 'Audio restart is unavailable for this session.' });
+        return;
+      }
+      const body = await readJson(req);
+      const enabled = Boolean(body.enabled);
+      // Preserve pointers/mapping state by releasing before restart; UI will reapply mapping as needed.
+      if (mapping) await mapping.emergencyRelease('audio-restart').catch(() => undefined);
+      else await pointers.panic('audio-restart').catch(() => undefined);
+      mappingActive = false;
+      cameraEnabled = false;
+      clearTriggerSources();
+      activeTaps.clear();
+      const result = await session.restartWithAudio(enabled);
+      if (mapping && enabled === false) {
+        // no-op
+      }
+      sendJson(res, 200, { ok: true, ...result, audio: session.audioStream ? session.audioStream.stats() : null });
       return;
     }
 
@@ -308,7 +364,14 @@ export async function startUiServer(options) {
         mapping.setJoystickCenter({ x: settings.joystickX, y: settings.joystickY });
         mapping.setJoystickRadius({ x: settings.joystickRadius, y: settings.joystickRadius });
         mapping.setMouseAnchor({ x: settings.cameraX, y: settings.cameraY });
-        mapping.setSensitivity(settings.sensitivity);
+        if (typeof mapping.setSensitivityX === 'function' && typeof mapping.setSensitivityY === 'function') {
+          mapping.setSensitivityX(settings.sensitivityX ?? settings.sensitivity ?? 1);
+          mapping.setSensitivityY(settings.sensitivityY ?? settings.sensitivity ?? 1);
+        } else {
+          mapping.setSensitivity(settings.sensitivity ?? 1);
+        }
+        if (typeof mapping.setMouseAcceleration === 'function') mapping.setMouseAcceleration(settings.mouseAcceleration === true);
+        if (typeof mapping.setTweaks === 'function') mapping.setTweaks(settings.tweaks);
         mapping.mouseDown();
         mappingActive = true;
         mappingTargets = settings;
@@ -317,8 +380,27 @@ export async function startUiServer(options) {
         activeTaps.clear();
         cameraEnabled = true;
         clearTriggerSources();
-        logger.info('keyboard mapping started', settings);
-        return { mappingActive, settings };
+        const tapKeys = [...mappingTaps.keys()];
+        const bindingList = Object.entries(mappingBindings).filter(([,v]) => v).map(([k,v]) => `${k}:${v}`);
+        const expected = Array.isArray(body.expectedKeys) ? body.expectedKeys.map(normalizeBindingKey) : null;
+        const receivedKeys = new Set([...Object.values(mappingBindings).filter(Boolean), ...tapKeys]);
+        const missingKeys = expected ? [...new Set(expected.filter(k => !receivedKeys.has(k)))] : [];
+        logger.info('keyboard mapping started', {
+          bindings: bindingList,
+          tapKeys,
+          cameraX: settings.cameraX, cameraY: settings.cameraY,
+          shootX: settings.shoot.x, shootY: settings.shoot.y,
+          scopeX: settings.scope.x, scopeY: settings.scope.y,
+          sensitivity: settings.sensitivity, sensitivityX: settings.sensitivityX, sensitivityY: settings.sensitivityY,
+          mouseAcceleration: settings.mouseAcceleration, tweaks: settings.tweaks,
+          fireWithLeftClick: settings.fireWithLeftClick,
+          expectedKeys: expected,
+          missingKeys,
+        });
+        if (missingKeys.length) {
+          throw new AppError(ErrorCode.BAD_REQUEST, `Missing bound keys on server: ${missingKeys.join(', ')}`);
+        }
+        return { mappingActive, settings: { ...settings, tapBindingKeys: tapKeys, bindings: mappingBindings }, missingKeys };
       }
       case 'mapping-stop': {
         mappingActive = false;
@@ -329,6 +411,37 @@ export async function startUiServer(options) {
           ? await mapping.emergencyRelease('mapping-stop')
           : await pointers.panic('mapping-stop');
         return { mappingActive, released };
+      }
+      case 'mapping-update': {
+        if (!mapping || !mappingActive) {
+          throw new AppError(ErrorCode.BAD_REQUEST, 'Keyboard mapping is not active');
+        }
+        const settings = mappingSettings(body);
+        mapping.setJoystickCenter({ x: settings.joystickX, y: settings.joystickY });
+        mapping.setJoystickRadius({ x: settings.joystickRadius, y: settings.joystickRadius });
+        mapping.setMouseAnchor({ x: settings.cameraX, y: settings.cameraY });
+        if (typeof mapping.setSensitivityX === 'function' && typeof mapping.setSensitivityY === 'function') {
+          mapping.setSensitivityX(settings.sensitivityX ?? settings.sensitivity ?? 1);
+          mapping.setSensitivityY(settings.sensitivityY ?? settings.sensitivity ?? 1);
+        } else {
+          mapping.setSensitivity(settings.sensitivity ?? 1);
+        }
+        if (typeof mapping.setMouseAcceleration === 'function') mapping.setMouseAcceleration(settings.mouseAcceleration === true);
+        if (typeof mapping.setTweaks === 'function') mapping.setTweaks(settings.tweaks);
+        mappingTargets = settings;
+        mappingBindings = settings.bindings;
+        mappingTaps = settings.tapBindings;
+        clearTriggerSources();
+        logger.info('keyboard mapping updated', {
+          cameraX: settings.cameraX, cameraY: settings.cameraY,
+          shootX: settings.shoot.x, shootY: settings.shoot.y,
+          scopeX: settings.scope.x, scopeY: settings.scope.y,
+          sensitivity: settings.sensitivity, sensitivityX: settings.sensitivityX, sensitivityY: settings.sensitivityY,
+          mouseAcceleration: settings.mouseAcceleration, tweaks: settings.tweaks,
+          fireWithLeftClick: settings.fireWithLeftClick,
+          tapKeys: [...mappingTaps.keys()],
+        });
+        return { mappingActive: true, updated: true };
       }
       case 'key-down':
       case 'key-up': {
@@ -379,8 +492,11 @@ export async function startUiServer(options) {
       case 'button-up': {
         if (!mapping || !mappingActive) return { mappingActive: false };
         const button = String(body.button ?? '');
-        const action = button === 'left' ? 'shoot' : button === 'right' ? 'scope' : null;
-        if (!action) throw new AppError(ErrorCode.BAD_REQUEST, 'Only left and right mouse buttons are mapped');
+        const fireAction = mappingTargets && mappingTargets.fireAction ? String(mappingTargets.fireAction).toUpperCase() : 'LEFT CLICK';
+        const fireButton = fireAction === 'RIGHT CLICK' ? 'right' : fireAction === 'MIDDLE CLICK' ? 'middle' : 'left';
+        const action = (button === fireButton) ? 'shoot' : (button === 'right' ? 'scope' : null);
+        if (!action) return { mappingActive };
+        if (action === 'shoot' && mappingTargets && mappingTargets.fireWithLeftClick === false && op === 'button-down') return { mappingActive };
         applyTrigger(action, `mouse:${button}`, op === 'button-down');
         return { mappingActive };
       }
@@ -395,9 +511,14 @@ export async function startUiServer(options) {
   }
 
   function applyTrigger(action, source, down) {
+    if (action === 'shoot' && mappingTargets && mappingTargets.fireWithLeftClick === false) {
+      if (down) return;
+      // if disabled, ensure any prior state from this source cleared
+    }
     const sources = triggerSources[action];
     if (down) {
       if (sources.has(source)) return;
+      if (action === 'shoot' && mappingTargets && mappingTargets.fireWithLeftClick === false) return;
       const wasReleased = sources.size === 0;
       sources.add(source);
       if (wasReleased) {
@@ -499,9 +620,20 @@ function mappingSettings(body) {
     return value;
   };
   const sensitivity = body.sensitivity === undefined ? 1 : Number(body.sensitivity);
+  const sensitivityX = body.sensitivityX === undefined ? sensitivity : Number(body.sensitivityX);
+  const sensitivityY = body.sensitivityY === undefined ? sensitivity : Number(body.sensitivityY);
   if (!Number.isFinite(sensitivity) || sensitivity < 0 || sensitivity > 10) {
     throw new AppError(ErrorCode.BAD_REQUEST, 'sensitivity must be between 0 and 10');
   }
+  if (!Number.isFinite(sensitivityX) || sensitivityX < 0.1 || sensitivityX > 10) {
+    throw new AppError(ErrorCode.BAD_REQUEST, 'sensitivityX must be between 0.1 and 10');
+  }
+  if (!Number.isFinite(sensitivityY) || sensitivityY < 0.1 || sensitivityY > 10) {
+    throw new AppError(ErrorCode.BAD_REQUEST, 'sensitivityY must be between 0.1 and 10');
+  }
+  const tweaks = body.tweaks === undefined ? 16450 : Number(body.tweaks);
+  const mouseAcceleration = body.mouseAcceleration === true || body.mouseAcceleration === 'true';
+  const fireWithLeftClick = body.fireWithLeftClick === false || body.fireWithLeftClick === 'false' ? false : true;
   const bindings = {
     forward: normalizeBindingKey(body.forwardKey ?? 'w'),
     left: normalizeBindingKey(body.leftKey ?? 'a'),
@@ -537,6 +669,11 @@ function mappingSettings(body) {
     cameraX: setting('cameraX', 0.5),
     cameraY: setting('cameraY', 0.5),
     sensitivity,
+    sensitivityX,
+    sensitivityY,
+    tweaks,
+    mouseAcceleration,
+    fireWithLeftClick,
     bindings: {
       ...bindings,
       cameraToggle: body.cameraToggleKey ? normalizeBindingKey(body.cameraToggleKey) : null,
@@ -649,4 +786,4 @@ function statusFor(error) {
       return 500;
   }
 }
-
+

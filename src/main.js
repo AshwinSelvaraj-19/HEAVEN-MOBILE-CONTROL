@@ -13,7 +13,7 @@
 import process from 'node:process';
 import { Adb } from './adb.js';
 import { HELP, parseArgs, SCRCPY_VERSION } from './config.js';
-import { readDeviceInfo, selectDevice } from './device.js';
+import { ensureScreenAwake, readDeviceInfo, selectDevice } from './device.js';
 import { AppError, ErrorCode, asAppError } from './errors.js';
 import { Logger } from './log.js';
 import { MappingEngine } from './mapping-engine.js';
@@ -120,11 +120,11 @@ async function main() {
       throw new AppError(ErrorCode.BAD_REQUEST, '--dry-run inspects the real toolchain and cannot be combined with --mock');
     }
 
-    /** @type {Adb | null} */
     let adb = null;
     let adbVersion = 'mock';
     /** @type {import('./device.js').DeviceInfo} */
     let device;
+    let screenWake = null;
 
     if (config.mock) {
       // Verification harness: exercise pointers/sequences/UI with no device.
@@ -139,7 +139,9 @@ async function main() {
         density: 420,
         rotation: 0,
         screenState: 'Awake',
+        locked: false,
       };
+      screenWake = { woke: false, unlocked: false, locked: false, screenState: 'Awake', action: 'none' };
       logger.warn('mock transport enabled', { note: 'no adb, no injection; messages are counted in memory' });
     } else {
       adb = new Adb(toolchain.adbPath, { logger });
@@ -149,6 +151,16 @@ async function main() {
 
       const serial = await selectDevice(adb, config.serial, logger);
       device = await readDeviceInfo(adb, serial);
+      if (config.mode !== 'dry-run' && config.ui) {
+        screenWake = await ensureScreenAwake(adb, serial, { logger, wake: config.wake !== false });
+        device.screenState = screenWake.screenState ?? device.screenState;
+        device.locked = Boolean(screenWake.locked);
+        if (screenWake.locked) {
+          logger.warn('phone is locked', { note: 'Unlock your phone to show the live screen. Passcode unlock is not automated.' });
+        }
+      } else {
+        screenWake = { woke: false, unlocked: false, locked: Boolean(device.locked), screenState: device.screenState, action: 'none' };
+      }
     }
 
     logger.info('device', {
@@ -219,6 +231,7 @@ async function main() {
         videoBitRate: 32000000,
         videoMaxSize: 2340,
       });
+      session.screenWake = screenWake;
 
       session.onLost((error) => {
         logger.error('session lost', { code: error.code, message: error.message });
@@ -289,7 +302,7 @@ async function main() {
       serial: device.serial,
       logger,
     });
-    const ui = await startUiServer({ config, logger, session, pointers, mapping, screenCapture, device, mock: config.mock });
+    const ui = await startUiServer({ config, logger, session, pointers, mapping, screenCapture, device, mock: config.mock, screenWake });
     logger.info('UI ready', { url: ui.url });
     process.stdout.write(`\n  Controller: ${ui.url}\n  Press Ctrl+C to release all touches and exit.\n\n`);
 

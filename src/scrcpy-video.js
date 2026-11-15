@@ -21,18 +21,33 @@ export class ScrcpyVideoStream {
     this.metricAt = Date.now();
     this.metricBytes = 0;
     this.metricFrames = 0;
+    /** Diagnostics exposed via /api/state */
+    this.connected = false;
+    this.totalFramesReceived = 0;
+    this.lastFrameAt = null;
+    this.codecConfigured = false;
+    this.keyframeReceived = false;
+    this.lastError = null;
+    this.lastKeyframeAt = null;
     socket.setNoDelay(true);
+    socket.on('connect', () => { this.connected = true; });
+    if (!socket.connecting) this.connected = true;
     socket.on('data', (chunk) => {
       this.processing = this.processing.then(() => this.#consume(chunk)).catch((error) => {
+        this.lastError = error.message;
         this.logger.error('scrcpy video parser failed', { message: error.message });
         this.#end(error);
       });
     });
     socket.on('error', (error) => {
+      this.lastError = error.message;
       this.logger.warn('scrcpy video socket error', { message: error.message });
       this.#end(error);
     });
-    socket.on('close', (hadError) => this.#end(new Error(`scrcpy video socket closed (bytes=${socket.bytesRead}, hadError=${hadError})`)));
+    socket.on('close', (hadError) => {
+      this.connected = false;
+      this.#end(new Error(`scrcpy video socket closed (bytes=${socket.bytesRead}, hadError=${hadError})`));
+    });
   }
 
   /** @param {import('node:http').ServerResponse} response */
@@ -78,6 +93,7 @@ export class ScrcpyVideoStream {
         this.pending = this.pending.subarray(12);
         this.configPacket = null;
         this.keyPacket = null;
+        this.keyframeReceived = false;
         for (const client of this.clients) client.primed = false;
         const width = this.sessionHeader.readUInt32BE(4);
         const height = this.sessionHeader.readUInt32BE(8);
@@ -100,11 +116,15 @@ export class ScrcpyVideoStream {
       if (frame.isConfig) {
         this.configPacket = frame;
         this.keyPacket = null;
+        this.codecConfigured = Boolean(this.codecHeader);
+        this.keyframeReceived = false;
         for (const client of this.clients) client.primed = false;
         continue;
       }
       this.metricBytes += packet.length;
       this.metricFrames++;
+      this.totalFramesReceived++;
+      this.lastFrameAt = Date.now();
       const elapsed = Date.now() - this.metricAt;
       if (elapsed >= 2000) {
         this.logger.info('scrcpy video throughput', {
@@ -118,6 +138,9 @@ export class ScrcpyVideoStream {
       }
       if (frame.isKey) {
         this.keyPacket = frame;
+        this.keyframeReceived = true;
+        this.codecConfigured = Boolean(this.codecHeader && this.configPacket);
+        this.lastKeyframeAt = Date.now();
         for (const client of this.clients) {
           if (client.primed) this.#writePacket(client, packet);
           else this.#prime(client);
@@ -159,8 +182,26 @@ export class ScrcpyVideoStream {
   #end(error) {
     if (this.closed) return;
     this.closed = true;
-    for (const client of this.clients) client.response.end();
+    this.connected = false;
+    this.lastError = error?.message ?? String(error);
+    for (const client of this.clients) {
+      try { client.response.end(); } catch {}
+    }
     this.clients.clear();
-    this.logger.warn('scrcpy video stream ended', { message: error.message });
+    this.logger.warn('scrcpy video stream ended', { message: this.lastError });
+  }
+
+  /** Diagnostics snapshot for /api/state */
+  stats() {
+    return {
+      videoConnected: this.connected && !this.closed,
+      videoFramesReceived: this.totalFramesReceived,
+      lastVideoFrameAt: this.lastFrameAt,
+      codecConfigured: Boolean(this.codecConfigured || (this.codecHeader && this.configPacket)),
+      keyframeReceived: Boolean(this.keyframeReceived),
+      lastVideoError: this.lastError ?? null,
+      clientCount: this.clients.size,
+      closed: this.closed,
+    };
   }
 }

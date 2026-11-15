@@ -146,6 +146,7 @@ export async function readDeviceInfo(adb, serial) {
   const density = await readDensity(adb, serial);
   const rotation = await readRotation(adb, serial);
   const screenState = await readScreenState(adb, serial);
+  const keyguard = await readKeyguardState(adb, serial);
 
   return {
     serial,
@@ -158,6 +159,7 @@ export async function readDeviceInfo(adb, serial) {
     density,
     rotation,
     screenState,
+    locked: Boolean(keyguard.locked || keyguard.showing),
   };
 }
 
@@ -215,7 +217,7 @@ async function readRotation(adb, serial) {
  * @param {import('./adb.js').Adb} adb
  * @param {string} serial
  */
-async function readScreenState(adb, serial) {
+export async function readScreenState(adb, serial) {
   try {
     const { stdout } = await adb.shell(['dumpsys', 'power'], { serial, allowFailure: true });
     const wakefulness = /mWakefulness=(\w+)/.exec(stdout)?.[1];
@@ -239,6 +241,82 @@ async function readScreenState(adb, serial) {
   }
   return 'unknown';
 }
+
+/**
+ * Best-effort keyguard/lockscreen detection.
+ * @param {import('./adb.js').Adb} adb
+ * @param {string} serial
+ */
+export async function readKeyguardState(adb, serial) {
+  const state = { locked: false, showing: false, raw: null };
+  try {
+    const { stdout } = await adb.shell(['dumpsys', 'window'], { serial, allowFailure: true, timeoutMs: 10000 });
+    state.raw = stdout;
+    state.showing = /mDreamingLockscreen=true/.test(stdout)
+      || /isKeyguardShowing=true/.test(stdout)
+      || /mShowingLockscreen=true/.test(stdout);
+    state.locked = /mInputRestricted=true/.test(stdout) || state.showing;
+    return state;
+  } catch {
+    return state;
+  }
+}
+
+/**
+ * Ensure the phone screen is on for live video capture.
+ * If locked with a passcode/PIN/pattern, do not attempt to unlock.
+ * @param {import('./adb.js').Adb} adb
+ * @param {string} serial
+ * @param {{logger?: import('./log.js').Logger, wake?: boolean}} [options]
+ */
+export async function ensureScreenAwake(adb, serial, options = {}) {
+  const logger = options.logger ?? null;
+  const wake = options.wake !== false;
+  const result = { woke: false, unlocked: false, locked: false, screenState: 'unknown', action: 'none' };
+  result.screenState = await readScreenState(adb, serial);
+  let keyguard = await readKeyguardState(adb, serial);
+
+  const isAwake = /awake|on/i.test(result.screenState);
+  if (!isAwake && wake) {
+    await adb.shell(['input', 'keyevent', 'KEYCODE_WAKEUP'], { serial, allowFailure: true, timeoutMs: 5000 });
+    await adb.shell(['input', 'keyevent', '224'], { serial, allowFailure: true, timeoutMs: 5000 });
+    result.woke = true;
+    result.action = 'wake';
+    await delay(400);
+    result.screenState = await readScreenState(adb, serial);
+    keyguard = await readKeyguardState(adb, serial);
+  }
+
+  if (keyguard.showing || keyguard.locked) {
+    // Try to dismiss a non-secure lock screen (swipe). Do not guess credentials.
+    if (wake) {
+      await adb.shell(['input', 'keyevent', '82'], { serial, allowFailure: true, timeoutMs: 5000 });
+      await adb.shell(['wm', 'dismiss-keyguard'], { serial, allowFailure: true, timeoutMs: 5000 });
+      await delay(300);
+      keyguard = await readKeyguardState(adb, serial);
+      if (!keyguard.showing && !keyguard.locked) {
+        result.unlocked = true;
+        result.action = result.woke ? 'wake+dismiss' : 'dismiss';
+      }
+    }
+  }
+
+  // Re-check: if still showing/restricted, treat as passcode-locked for UI purposes.
+  result.screenState = await readScreenState(adb, serial);
+  keyguard = await readKeyguardState(adb, serial);
+  result.locked = Boolean(keyguard.showing || keyguard.locked);
+  logger?.info('screen wake check', {
+    serial,
+    screenState: result.screenState,
+    woke: result.woke,
+    unlocked: result.unlocked,
+    locked: result.locked,
+    action: result.action,
+  });
+  return result;
+}
+
+function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 /**
  * Re-export for tests / callers that only need parsing.

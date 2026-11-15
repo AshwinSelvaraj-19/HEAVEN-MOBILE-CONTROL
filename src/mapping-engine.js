@@ -65,15 +65,21 @@ export class MappingEngine {
 
     // ---- Relative mouse camera ----
     this.mouseDelta = { x: 0, y: 0 };
-    this.mouseSensitivity = options.mouseSensitivity !== undefined
-      ? Math.max(0, options.mouseSensitivity)
-      : 1.0;
+    const baseSensitivity = options.mouseSensitivity !== undefined ? Math.max(0, options.mouseSensitivity) : 1.0;
+    this.mouseSensitivityX = options.mouseSensitivityX !== undefined ? Math.max(0, options.mouseSensitivityX) : baseSensitivity;
+    this.mouseSensitivityY = options.mouseSensitivityY !== undefined ? Math.max(0, options.mouseSensitivityY) : baseSensitivity;
+    this.mouseSensitivity = Math.max(this.mouseSensitivityX, this.mouseSensitivityY); // legacy mirror
+    this.mouseAcceleration = options.mouseAcceleration === true;
+    this.tweaks = Number.isFinite(Number(options.tweaks)) ? Number(options.tweaks) : 16450;
     this.mouseAnchor = {
       x: options.mouseAnchorX !== undefined ? Math.max(0, Math.min(1, options.mouseAnchorX)) : 0.5,
       y: options.mouseAnchorY !== undefined ? Math.max(0, Math.min(1, options.mouseAnchorY)) : 0.5,
     };
     this.mousePressed = false;          // true when mouse button held for camera
     this.cameraPointerDown = false;     // tracks if PointerManager has 'camera' pointer down
+    this.cameraEnabled = true;
+    this.aimIdleMs = 250;
+    this._aimIdleTimer = null;
   
   }
 
@@ -305,17 +311,31 @@ export class MappingEngine {
    * @param {number} dy - relative Y movement (pixels or UI units)
    */
   mouseMove(dx, dy) {
-    this.mouseDelta.x += dx;
-    this.mouseDelta.y += dy;
-
-    if (!this.mousePressed) {
-      // Camera not active; just accumulate delta for potential future use.
-      return;
+    if (this.cameraEnabled === false) return;
+    if (!this.mousePressed && typeof this.aimIdleMs === 'number') {
+      const dx0 = this.mouseDelta.x + dx;
+      const dy0 = this.mouseDelta.y + dy;
+      this.mouseDown();
+      this.mouseDelta.x = dx0;
+      this.mouseDelta.y = dy0;
+    } else {
+      this.mouseDelta.x += dx;
+      this.mouseDelta.y += dy;
     }
 
-    // Apply sensitivity scaling
-    const sx = this.mouseDelta.x * this.mouseSensitivity;
-    const sy = this.mouseDelta.y * this.mouseSensitivity;
+    // Apply sensitivity scaling and optional acceleration
+    var rawDx = this.mouseDelta.x;
+    var rawDy = this.mouseDelta.y;
+    if (this.mouseAcceleration) {
+      const mag = Math.hypot(rawDx, rawDy);
+      if (mag > 0) {
+        const scale = Math.min(3, 1 + mag / 40);
+        rawDx *= scale;
+        rawDy *= scale;
+      }
+    }
+    const sx = rawDx * this.mouseSensitivityX;
+    const sy = rawDy * this.mouseSensitivityY;
 
     // Calculate raw position relative to the configured anchor
     const ax = this.mouseAnchor.x * this.screen.width;
@@ -367,7 +387,7 @@ export class MappingEngine {
     // delta while moving the anchor would preserve the out-of-bounds absolute
     // coordinate and pin the pointer to the edge. Reset only the crossed axis
     // so the next relative event continues from the new anchor.
-    if (this.mouseSensitivity > 0) {
+    if (this.mouseSensitivityX > 0 || this.mouseSensitivityY > 0) {
       if (actualDeltaX !== 0) this.mouseDelta.x = 0;
       if (actualDeltaY !== 0) this.mouseDelta.y = 0;
     }
@@ -378,6 +398,10 @@ export class MappingEngine {
     // Delegate to PointerManager — it owns pointer lifecycle.
     if (this.cameraPointerDown) {
       this.pm.move("camera", cx, cy);
+    }
+    if (typeof this.aimIdleMs === 'number' && this.mousePressed) {
+      if (this._aimIdleTimer) clearTimeout(this._aimIdleTimer);
+      this._aimIdleTimer = setTimeout(() => { this.mouseUp(); }, Math.max(0, this.aimIdleMs));
     }
   }
 
@@ -400,27 +424,29 @@ export class MappingEngine {
   }
 
   /**
-   * Mouse button released — ends the camera pointer lifecycle (UP).
+   * Mouse button released - ends the camera pointer lifecycle (UP).
    * After this, mouseMove() stops sending MOVE events.
    */
   mouseUp() {
+    if (this._aimIdleTimer) { clearTimeout(this._aimIdleTimer); this._aimIdleTimer = null; }
     this.mousePressed = false;
 
-    if (this.cameraPointerDown) {
+    if (this.cameraPointerDown && this.pm.active.has('camera')) {
       try {
         this.pm.up('camera');
       } catch (e) {
         this.loggerWarn('mouseUp', e);
       }
-      this.cameraPointerDown = false;
     }
+    this.cameraPointerDown = false;
     // Reset accumulated delta so a new press starts cleanly
     this.mouseDelta = { x: 0, y: 0 };
   }
 
-  /** -------------------------------------------------------------
-   *  CONFIGURATION ACCESSORS
-   *  ------------------------------------------------------------- */
+  setCameraEnabled(enabled) {
+    this.cameraEnabled = enabled !== false;
+    if (!this.cameraEnabled && (this.mousePressed || this.cameraPointerDown)) this.mouseUp();
+  }
 
   setJoystickCenter(center) {
     // center: { x: number, y: number } percentages (0.0 - 1.0)
@@ -445,7 +471,29 @@ export class MappingEngine {
   }
 
   setSensitivity(sensitivity) {
-    this.mouseSensitivity = Math.max(0, sensitivity);
+    const v = Math.max(0, sensitivity);
+    this.mouseSensitivityX = v;
+    this.mouseSensitivityY = v;
+    this.mouseSensitivity = v;
+  }
+
+  setSensitivityX(sensitivity) {
+    this.mouseSensitivityX = Math.max(0, sensitivity);
+    this.mouseSensitivity = Math.max(this.mouseSensitivityX, this.mouseSensitivityY);
+  }
+
+  setSensitivityY(sensitivity) {
+    this.mouseSensitivityY = Math.max(0, sensitivity);
+    this.mouseSensitivity = Math.max(this.mouseSensitivityX, this.mouseSensitivityY);
+  }
+
+  setMouseAcceleration(enabled) {
+    this.mouseAcceleration = enabled === true;
+  }
+
+  setTweaks(value) {
+    const n = Number(value);
+    this.tweaks = Number.isFinite(n) ? n : this.tweaks;
   }
 
   setMouseAnchor(anchor) {
