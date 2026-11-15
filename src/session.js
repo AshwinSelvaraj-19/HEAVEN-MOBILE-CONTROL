@@ -43,9 +43,9 @@ export class ScrcpySession {
     this.allowPowerOn = options.allowPowerOn ?? false;
     this.startTimeoutMs = options.startTimeoutMs ?? 20000;
     this.video = options.video !== undefined ? options.video : false;
-    this.maxFps = options.maxFps ?? 90;
-    this.videoBitRate = options.videoBitRate ?? 20000000;
-    this.videoMaxSize = options.videoMaxSize ?? 2400;
+    this.maxFps = options.maxFps ?? 120;
+    this.videoBitRate = options.videoBitRate ?? 32000000;
+    this.videoMaxSize = options.videoMaxSize ?? 2340;
     this.audio = options.audio !== undefined ? options.audio : false;
     this.control = options.control !== undefined ? options.control : true;
 

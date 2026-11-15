@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The loopback controller.
  *
  * Served from 127.0.0.1 only, with a per-run token required on every API call.
@@ -16,7 +16,7 @@
  */
 export function renderPage(options) {
   const { token, width, height, model, mock, screenAvailable = false, videoAvailable = false, mouseSensitivity = 1 } = options;
-  const title = `HEAVEN Mobile Control — ${model || 'device'}`;
+  const title = `HEAVEN Mobile Control â€” ${model || 'device'}`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -61,7 +61,7 @@ export function renderPage(options) {
   #stage {
     position: relative; flex: none; aspect-ratio: ${width} / ${height};
     background: #05070a; border: 1px solid #304257; border-radius: 12px;
-    overflow: hidden; cursor: crosshair; touch-action: none;
+    overflow: hidden; cursor: default; touch-action: none;
     box-shadow: 0 24px 70px rgba(0,0,0,.58), 0 0 0 1px #ffffff08;
   }
   #stage .grid { position: absolute; inset: 0;
@@ -133,19 +133,37 @@ export function renderPage(options) {
   .mapping-action button { min-height: 44px; font-size: 13px; }
   @media (max-width: 1000px) { main { grid-template-columns: minmax(0,1fr) 360px; } header { padding-inline: 14px; gap: 8px; } .brand-copy { min-width: 175px; } }
   @media (max-width: 780px) { body { height: auto; min-height: 100vh; overflow: auto; } header { min-height: 62px; height: auto; flex-wrap: wrap; } main { display: flex; flex-direction: column; } .preview-column { min-height: 55vh; } .preview-head { padding-inline: 14px; } .stage-wrap { min-height: 48vh; padding: 12px; } aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; padding: 12px; } .brand-copy { min-width: 0; } }
+  .msi-kb-trigger { position: fixed; top: 118px; right: 16px; z-index: 7; width: 56px; height: 56px; border-radius: 12px; border: 1px solid #3476b6; background: #173550; color: #d9efff; font-size: 22px; cursor: pointer; display: grid; place-items: center; box-shadow: 0 8px 24px #0004; }
+  .msi-kb-trigger:hover { background: #24527d; border-color: #5fa8ff; }
+  .msi-kb-trigger.active { background: #2b6a9e; border-color: #8cc8ff; }
+  .msi-panel { position: fixed; right: 0; top: 118px; bottom: 0; width: min(460px, 92vw); max-width: 460px; background: #101722; border-left: 1px solid var(--line); box-shadow: -16px 0 40px #0005; transform: translateX(100%); opacity: 0; pointer-events: none; transition: transform .18s ease, opacity .18s ease; z-index: 8; display: flex; flex-direction: column; }
+  .msi-panel.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
+  .msi-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--line); background: #111a26; }
+  .msi-panel-close { width: 28px; height: 28px; border-radius: 7px; font-size: 16px; line-height: 1; cursor: pointer; background: transparent; color: var(--text); border: 1px solid var(--line); }
+  .msi-panel-body { flex: 1; overflow-y: auto; padding: 14px; }
+  .msi-section { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: #111a26; margin-bottom: 10px; }
+  .msi-section h3 { margin: 0 0 10px; font-size: 13px; color: var(--text); }
+  .msi-keyrow { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .msi-keybadge { display: grid; place-items: center; border-radius: 8px; border: 1px solid #3476b6; background: #122b43; color: #d9efff; font-size: 12px; font-weight: 700; padding: 10px 6px; cursor: pointer; position: relative; }
+  .msi-keybadge .lbl { pointer-events: none; font-size: 10px; letter-spacing: .04em; }
+  .msi-keybadge input { width: 100%; height: 100%; background: transparent; border: none; outline: none; color: inherit; text-align: center; font: inherit; font-size: 11px; font-weight: 700; opacity: 0; position: absolute; inset: 0; cursor: pointer; z-index: 1; }
+  .msi-keybadge input:focus { opacity: 1; border-bottom: 2px solid var(--accent); }
+  .msi-keybadge.active { background: #173550; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-2); }
+  .msi-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
 </style>
 </head>
 <body>
 <header>
   <div class="brand-mark">H</div>
   <div class="brand-copy"><h1>Heaven Mobile Control</h1><small>Phone gaming controller</small></div>
-  <span class="pill" id="session-pill">connecting…</span>
-  <span class="pill" id="device-pill">${escapeHtml(model || 'unknown')} · ${width}&times;${height}</span>
-  <span class="pill" id="video-status">${videoAvailable ? 'Video starting · 90 fps target' : 'Screenshot preview'}</span>
+  <span class="pill" id="session-pill">connectingâ€¦</span>
+  <span class="pill" id="device-pill">${escapeHtml(model || 'unknown')} Â· ${width}&times;${height}</span>
+  <span class="pill" id="video-status">${videoAvailable ? 'Video starting Â· 90 fps target' : 'Screenshot preview'}</span>
   <span class="spacer"></span>
-  <button class="danger" id="panic">Release all · Esc</button>
+  <button class="danger" id="panic">Release all Â· Esc</button>
 </header>
-<div class="banner" id="mock-banner">MOCK TRANSPORT — no device attached; messages are counted, not injected.</div>
+<div class="banner" id="mock-banner">MOCK TRANSPORT â€” no device attached; messages are counted, not injected.</div>
 <main>
   <section class="preview-column" aria-label="Live phone preview">
     <div class="preview-head"><div><strong>Live phone</strong><small>Drag imported controls to match your HUD</small></div><span class="landscape-pill">USB preview</span><div class="layout-actions"><span id="layout-status"></span><button id="layout-edit-toggle" type="button">Edit layout</button><button id="layout-delete" type="button" disabled>Delete</button></div></div>
@@ -154,7 +172,7 @@ export function renderPage(options) {
         <div class="grid"></div>
         <canvas id="phone-video" aria-label="Live Android phone video"></canvas>
         <img id="phone-screen" alt="Live Android phone screen">
-        <div id="screen-message">${escapeHtml(mock ? 'Mock mode is active. Connect your phone and run npm run live to see its screen.' : screenAvailable ? 'Waiting for the phone screen…' : 'Phone screen preview is unavailable.')}</div>
+        <div id="screen-message">${escapeHtml(mock ? 'Mock mode is active. Connect your phone and run npm run live to see its screen.' : screenAvailable ? 'Waiting for the phone screenâ€¦' : 'Phone screen preview is unavailable.')}</div>
       </div>
     </div>
   </section>
@@ -224,15 +242,42 @@ export function renderPage(options) {
       <div class="kv"><span>active pointers</span><b id="k-count">0</b></div>
       <div class="kv"><span>messages sent</span><b id="k-messages">0</b></div>
       <div class="kv"><span>panics</span><b id="k-panics">0</b></div>
-      <div class="kv"><span>achieved Hz</span><b id="k-hz">—</b></div>
-      <div class="kv"><span>last proof</span><b id="k-proof">—</b></div>
+      <div class="kv"><span>achieved Hz</span><b id="k-hz">â€”</b></div>
+      <div class="kv"><span>last proof</span><b id="k-proof">â€”</b></div>
       <div id="log"></div>
     </details>
     <footer>
-      <span id="f-note">Controls run only while mapping is active.</span><span class="spacer"></span><span id="f-token">${escapeHtml(token.slice(0, 6))}…</span>
+      <span id="f-note">Controls run only while mapping is active.</span><span class="spacer"></span><span id="f-token">${escapeHtml(token.slice(0, 6))}â€¦</span>
     </footer>
   </aside>
 </main>
+<button class="msi-kb-trigger" id="msi-kb-trigger" title="Keyboard key mapping">âŒ¨</button>
+<div class="msi-panel" id="msi-panel">
+  <div class="msi-panel-head"><h3>Keyboard mapping</h3><button class="msi-panel-close" id="msi-panel-close">Ã—</button></div>
+  <div class="msi-panel-body">
+    <div class="msi-section">
+      <h3>Movement &amp; aim</h3>
+      <div class="msi-keyrow">
+        <div class="msi-keybadge" data-binding="forwardKey"><span class="lbl">Forward</span><input type="text" readonly></div>
+        <div class="msi-keybadge" data-binding="leftKey"><span class="lbl">Left</span><input type="text" readonly></div>
+        <div class="msi-keybadge" data-binding="backwardKey"><span class="lbl">Back</span><input type="text" readonly></div>
+        <div class="msi-keybadge" data-binding="rightKey"><span class="lbl">Right</span><input type="text" readonly></div>
+        <div class="msi-keybadge" data-binding="fireKey"><span class="lbl">Fire</span><input type="text" readonly></div>
+        <div class="msi-keybadge" data-binding="scopeKey"><span class="lbl">Scope</span><input type="text" readonly></div>
+      </div>
+    </div>
+    <div class="msi-section">
+      <h3>Tap buttons</h3>
+      <p class="msi-hint">Add on screen â†’ click spot â†’ press key when prompted</p>
+      <div class="msi-keyrow"><div class="msi-keybadge" id="msi-add-tap"><span class="lbl">+ Add tap</span><input type="text" readonly></div></div>
+    </div>
+    <div class="msi-section">
+      <h3>Fine-tune positions</h3>
+      <p class="msi-hint">Fine-tune joystick/camera/fire/scope positions below</p>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   var TOKEN = ${JSON.stringify(token)};
@@ -280,7 +325,7 @@ export function renderPage(options) {
     videoCanvas.width = width;
     videoCanvas.height = height;
     fitStage();
-    document.getElementById('device-pill').textContent = '${escapeHtml(model || 'unknown')} · ' + W + '×' + H;
+    document.getElementById('device-pill').textContent = '${escapeHtml(model || 'unknown')} Â· ' + W + 'Ã—' + H;
     updateProfileOrientation();
   }
 
@@ -318,8 +363,7 @@ export function renderPage(options) {
   }
 
   function allowedProfileKey(key) {
-    return /^[a-z0-9]$/.test(key)
-      || ['space', 'shift', 'control', 'alt', 'tab', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].indexOf(key) !== -1;
+    return typeof key === 'string' && key.length > 0 && key !== 'escape';
   }
 
   function refreshLayoutSelection() {
@@ -474,16 +518,58 @@ export function renderPage(options) {
     return settings;
   }
 
-  function normalizeEventKey(key) {
-    if (key === ' ') { return 'space'; }
-    if (key.length === 1) { return key.toLowerCase(); }
-    return key.toLowerCase();
+  function normalizeEventKey(key, code) {
+    if (code) {
+      var c = String(code);
+      if (/^Key[A-Z]$/.test(c)) { return c.slice(3).toLowerCase(); }
+      if (/^Digit\d$/.test(c)) { return c.slice(5); }
+      if (/^Numpad\d$/.test(c)) { return 'numpad' + c.slice(6); }
+      var codeMap = {
+        NumpadMultiply: 'numpadmultiply', NumpadAdd: 'numpadadd', NumpadSubtract: 'numpadsubtract',
+        NumpadDecimal: 'numpaddecimal', NumpadDivide: 'numpaddivide', NumpadEnter: 'numpadenter',
+        ShiftLeft: 'shift', ShiftRight: 'shift', ControlLeft: 'control', ControlRight: 'control',
+        AltLeft: 'alt', AltRight: 'alt', MetaLeft: 'meta', MetaRight: 'meta',
+        Space: 'space', Tab: 'tab', Enter: 'enter', Escape: 'escape', Backspace: 'backspace',
+        Delete: 'delete', Insert: 'insert', Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown',
+        ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
+        CapsLock: 'capslock', NumLock: 'numlock', ScrollLock: 'scrolllock', Pause: 'pause',
+        PrintScreen: 'printscreen', ContextMenu: 'contextmenu',
+        Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\\\',
+        Semicolon: ';', Quote: "'", Backquote: '\u0060', Comma: ',', Period: '.', Slash: '/'
+      };
+      if (codeMap[c]) { return codeMap[c]; }
+      if (/^F\d{1,2}$/.test(c)) { return c.toLowerCase(); }
+    }
+    if (!key) { return ''; }
+    var raw = String(key);
+    var lower = raw.toLowerCase();
+    var aliases = { ' ': 'space', spacebar: 'space', ctrl: 'control', esc: 'escape', del: 'delete', os: 'meta', win: 'meta' };
+    if (aliases[lower]) { return aliases[lower]; }
+    if (raw === 'Dead' || raw === 'Unidentified') { return ''; }
+    if (/^f\d{1,2}$/i.test(raw)) { return lower; }
+    if (raw.length === 1) { return lower; }
+    return lower;
   }
 
   function displayKey(key) {
-    if (key === 'space') { return 'Space'; }
-    if (key.indexOf('arrow') === 0) { return 'Arrow ' + key.slice(5); }
-    return key.length === 1 ? key.toUpperCase() : key.charAt(0).toUpperCase() + key.slice(1);
+    if (!key) { return 'Set key'; }
+    var map = {
+      space: 'Space', control: 'Ctrl', shift: 'Shift', alt: 'Alt', altgraph: 'AltGr', meta: 'Meta',
+      tab: 'Tab', enter: 'Enter', backspace: 'Backspace', delete: 'Delete', insert: 'Insert',
+      home: 'Home', end: 'End', pageup: 'PageUp', pagedown: 'PageDown',
+      arrowup: 'â†‘', arrowdown: 'â†“', arrowleft: 'â†', arrowright: 'â†’',
+      capslock: 'CapsLock', numlock: 'NumLock', scrolllock: 'ScrollLock', pause: 'Pause',
+      printscreen: 'PrtSc', contextmenu: 'Menu', wheelup: 'WheelUp', wheeldown: 'WheelDown',
+      numpad0: 'Num0', numpad1: 'Num1', numpad2: 'Num2', numpad3: 'Num3', numpad4: 'Num4',
+      numpad5: 'Num5', numpad6: 'Num6', numpad7: 'Num7', numpad8: 'Num8', numpad9: 'Num9',
+      numpadmultiply: 'Num*', numpadadd: 'Num+', numpadsubtract: 'Num-', numpaddecimal: 'Num.',
+      numpaddivide: 'Num/', numpadenter: 'NumEnter',
+      '-': '-', '=': '=', '[': '[', ']': ']', '\\\\': '\\\\', ';': ';', "'": "'", '\u0060': '\u0060', ',': ',', '.': '.', '/': '/'
+    };
+    if (map[key]) { return map[key]; }
+    if (/^f\d{1,2}$/.test(key)) { return key.toUpperCase(); }
+    if (key.length === 1) { return key.toUpperCase(); }
+    return key.charAt(0).toUpperCase() + key.slice(1);
   }
 
   function saveImportedBindings() {
@@ -592,9 +678,9 @@ export function renderPage(options) {
       return;
     }
     var name = document.getElementById('new-action-name').value.trim();
-    var key = normalizeEventKey(document.getElementById('new-action-key').value);
+    var key = normalizeEventKey(document.getElementById('new-action-key').value, null);
     if (!name || !allowedProfileKey(key)) {
-      document.getElementById('layout-status').textContent = 'Enter an action name and valid key.';
+      document.getElementById('layout-status').textContent = 'Enter an action name and a key (Esc is reserved).';
       return;
     }
     layoutEditMode = true;
@@ -642,10 +728,10 @@ export function renderPage(options) {
             if (item.Type === 'Script') skipped++;
             return;
           }
-          var key = String(item.Key).toLowerCase();
-          var keyAliases = { ctrl: 'control', 'mousewheelup': 'wheelup', 'mousewheeldown': 'wheeldown' };
+          var key = normalizeEventKey(String(item.Key), null) || String(item.Key).toLowerCase();
+          var keyAliases = { ctrl: 'control', 'mousewheelup': 'wheelup', 'mousewheeldown': 'wheeldown', mouserbutton: 'f13' };
           key = keyAliases[key] || key;
-          if (!/^[a-z0-9]$/.test(key) && ['space', 'shift', 'control', 'alt', 'tab', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'wheelup', 'wheeldown'].indexOf(key) === -1) {
+          if (!allowedProfileKey(key)) {
             skipped++;
             return;
           }
@@ -742,7 +828,7 @@ export function renderPage(options) {
         mappingActive = true;
         document.getElementById('mapping-start').textContent = 'Stop mapping';
         document.getElementById('mapping-start').classList.add('danger');
-        document.getElementById('mapping-hint').textContent = 'Mapping active · press WASD or an imported key. This browser page must stay focused.';
+        document.getElementById('mapping-hint').textContent = 'Mapping active Â· press WASD or an imported key. This browser page must stay focused.';
       }).catch(function (error) {
         if (document.pointerLockElement === stage) { document.exitPointerLock(); }
         report(error);
@@ -778,14 +864,12 @@ export function renderPage(options) {
     if (tapBindingInput && !mappingActive) {
       evt.preventDefault();
       if (evt.key === 'Escape') { tapBindingInput.blur(); return; }
-      var chosenTapKey = normalizeEventKey(evt.key);
-      var allowedTapKey = /^[a-z0-9]$/.test(chosenTapKey)
-        || ['space', 'shift', 'control', 'alt', 'tab', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].indexOf(chosenTapKey) !== -1;
-      if (!allowedTapKey) { report(new Error('Choose a letter, number, Space, Shift, Control, Alt, Tab, or arrow key')); return; }
+      var chosenTapKey = normalizeEventKey(evt.key, evt.code);
+      if (!allowedProfileKey(chosenTapKey)) { report(new Error('Escape is reserved and cannot be used for keymapping.')); return; }
       var index = Number(tapBindingInput.dataset.index);
       if (!Number.isInteger(index) || !importedTapBindings[index]) return;
       importedTapBindings[index].key = chosenTapKey;
-      if (importedHudTargets[index]) { importedHudTargets[index].key = chosenTapKey; importedHudTargets[index].label = chosenTapKey; }
+      if (importedHudTargets[index]) { importedHudTargets[index].key = chosenTapKey; importedHudTargets[index].label = displayKey(chosenTapKey); }
       saveImportedBindings();
       renderHudTargets();
       renderImportedBindings();
@@ -797,12 +881,13 @@ export function renderPage(options) {
       evt.preventDefault();
       if (evt.key === 'Escape') { bindingInput.blur(); return; }
       try {
-        var chosen = normalizeEventKey(evt.key);
-        if (!chosen || chosen === 'escape') { throw new Error('Escape is reserved for emergency release'); }
+        var chosen = normalizeEventKey(evt.key, evt.code);
+        if (!chosen || chosen === 'escape') { throw new Error('Escape is reserved and cannot be bound'); }
         bindingInput.value = displayKey(chosen);
         var bindings = {};
         document.querySelectorAll('.binding-input').forEach(function (input) {
-          bindings[input.dataset.binding] = normalizeEventKey(input.value);
+          var bk = normalizeEventKey(input.value, null);
+          bindings[input.dataset.binding] = allowedProfileKey(bk) ? bk : '';
         });
         localStorage.setItem('heaven-key-bindings', JSON.stringify(bindings));
         saveImportedBindings();
@@ -815,15 +900,15 @@ export function renderPage(options) {
       panic();
       return;
     }
-    var key = normalizeEventKey(evt.key);
+    var key = normalizeEventKey(evt.key, evt.code);
     var isMappedKey = key === profileCameraToggleKey
       || importedTapBindings.some(function (target) { return target.key === key; })
       || Array.prototype.some.call(document.querySelectorAll('.binding-input:not(.tap-binding-input)'), function (input) {
-        return normalizeEventKey(input.value) === key;
+        return normalizeEventKey(input.value, null) === key;
       });
     if (mappingActive && isMappedKey) evt.preventDefault();
     if (mappingActive && key !== 'escape') {
-      document.getElementById('mapping-hint').textContent = 'Keyboard received: ' + displayKey(key) + ' · keep this browser page focused.';
+      document.getElementById('mapping-hint').textContent = 'Keyboard received: ' + displayKey(key) + ' Ã‚Â· keep this browser page focused.';
     }
     if (mappingActive && key === 'wheelup') { evt.preventDefault(); queuedApi({ op: 'key-down', key: key }); return; }
     if (mappingActive && ['w', 'a', 's', 'd'].indexOf(key) !== -1) {
@@ -834,7 +919,7 @@ export function renderPage(options) {
     }
   }, true);
   window.addEventListener('keyup', function (evt) {
-    var key = normalizeEventKey(evt.key);
+    var key = normalizeEventKey(evt.key, evt.code);
     if (mappingActive && ['w', 'a', 's', 'd'].indexOf(key) !== -1) {
       evt.preventDefault();
       queuedApi({ op: 'key-up', key: key });
@@ -929,10 +1014,10 @@ export function renderPage(options) {
         document.getElementById('k-count').textContent = state.pointers.count;
         document.getElementById('k-messages').textContent = state.pointers.totalMessages;
         document.getElementById('k-panics').textContent = state.pointers.panics;
-        document.getElementById('k-hz').textContent = state.lastSweep ? state.lastSweep.achievedHz : '—';
+        document.getElementById('k-hz').textContent = state.lastSweep ? state.lastSweep.achievedHz : 'â€”';
         document.getElementById('k-proof').textContent = state.lastProof
-          ? (state.lastProof.ok ? 'ok' : 'failed') + ' · ' + state.lastProof.totalMs + ' ms'
-          : '—';
+          ? (state.lastProof.ok ? 'ok' : 'failed') + ' Â· ' + state.lastProof.totalMs + ' ms'
+          : 'â€”';
         render(state.log || []);
       })
       .catch(function () {
@@ -1020,7 +1105,7 @@ export function renderPage(options) {
         var now = performance.now();
         if (now - fpsWindowStart >= 1000) {
           var fps = Math.round(renderedFrames * 1000 / (now - fpsWindowStart));
-          document.getElementById('video-status').textContent = 'Video ' + fps + ' fps · ' + decodedWidth + '×' + decodedHeight;
+          document.getElementById('video-status').textContent = 'Video ' + fps + ' fps Â· ' + decodedWidth + 'Ã—' + decodedHeight;
           renderedFrames = 0;
           fpsWindowStart = now;
         }
@@ -1159,5 +1244,51 @@ function escapeHtml(value) {
       default:
         return '&#39;';
     }
+  var msiPanel = document.getElementById('msi-panel');
+  var msiTrigger = document.getElementById('msi-kb-trigger');
+  var msiClose = document.getElementById('msi-panel-close');
+  if (msiPanel && msiTrigger && msiClose) {
+    function toggleMsiPanel() {
+      var open = msiPanel.classList.toggle('open');
+      msiTrigger.classList.toggle('active', open);
+      msiTrigger.setAttribute('aria-expanded', String(open));
+      if (open) msiPanel.focus();
+    }
+    msiTrigger.addEventListener('click', toggleMsiPanel);
+    msiClose.addEventListener('click', toggleMsiPanel);
+    document.addEventListener('click', function (evt) {
+      if (!msiPanel.classList.contains('open')) return;
+      if (!msiPanel.contains(evt.target) && evt.target !== msiTrigger) toggleMsiPanel();
+    });
+    function setupMsiBadge(binding) {
+      var badge = document.querySelector('.msi-keybadge[data-binding="' + binding + '"]');
+      if (!badge) return;
+      var input = badge.querySelector('input');
+      badge.addEventListener('click', function () { input.value = ''; input.focus(); badge.classList.add('active'); });
+      input.addEventListener('blur', function () { badge.classList.remove('active'); });
+      input.addEventListener('keydown', function (evt) {
+        evt.preventDefault(); evt.stopPropagation();
+        if (evt.key === 'Escape') { input.blur(); return; }
+        var chosen = normalizeEventKey(evt.key, evt.code);
+        if (!allowedProfileKey(chosen)) return;
+        input.value = displayKey(chosen);
+        var mainInput = document.querySelector('.binding-input[data-binding="' + binding + '"]');
+        if (mainInput) { mainInput.value = displayKey(chosen); saveImportedBindings(); refreshMsiBadges(); }
+        input.blur();
+      });
+    }
+    ['forwardKey','leftKey','backwardKey','rightKey','fireKey','scopeKey'].forEach(setupMsiBadge);
+    document.getElementById('msi-add-tap').addEventListener('click', function () {
+      if (mappingActive) { document.getElementById('layout-status').textContent = 'Stop mapping before editing.'; return; }
+      if (importedTapBindings.length >= 64) { document.getElementById('layout-status').textContent = 'Supports up to 64 tap buttons.'; return; }
+      layoutEditMode = true;
+      placingNewControl = true;
+      document.getElementById('layout-edit-toggle').classList.add('active');
+      document.getElementById('layout-edit-toggle').textContent = 'Done editing';
+      document.getElementById('layout-status').textContent = 'Click the spot on the phone preview.';
+      renderHudTargets();
+    });
+  }
+
   });
 }

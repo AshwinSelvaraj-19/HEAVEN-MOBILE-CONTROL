@@ -145,7 +145,9 @@ export class ScrcpyVideoStream {
     // Do not drop predictive H.264 packets: subsequent frames depend on them.
     // Disconnect only a client that cannot keep up; it can reconnect at the
     // next cached keyframe without corrupting its current decode sequence.
-    if (client.response.writableLength > 8 * 1024 * 1024) {
+    // Keep a tighter bound to avoid building multi-second latency when the
+    // browser or USB link stalls.
+    if (client.response.writableLength > 2 * 1024 * 1024) {
       this.clients.delete(client);
       client.response.destroy(new Error('Video client fell too far behind'));
       return;

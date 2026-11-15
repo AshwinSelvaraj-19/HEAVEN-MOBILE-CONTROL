@@ -213,10 +213,11 @@ async function main() {
         serverJarPath: toolchain.serverJarPath,
         allowPowerOn: config.allowPowerOn,
         // Use scrcpy's native hardware-encoded stream for the interactive UI.
+        // 1080x2340 native portrait (max_size=2340), max fps, tuned for low latency.
         video: !config.mock && config.ui,
-        maxFps: 90,
-        videoBitRate: 40000000,
-        videoMaxSize: 2400,
+        maxFps: 120,
+        videoBitRate: 32000000,
+        videoMaxSize: 2340,
       });
 
       session.onLost((error) => {

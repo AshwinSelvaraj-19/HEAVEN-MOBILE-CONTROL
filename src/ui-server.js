@@ -550,12 +550,18 @@ function mappingSettings(body) {
 /** @param {unknown} value */
 function normalizeBindingKey(value) {
   let key = String(value ?? '').trim().toLowerCase();
-  if (key === ' ') key = 'space';
-  if (key === 'ctrl') key = 'control';
-  const allowed = /^[a-z0-9]$/.test(key)
-    || ['space', 'shift', 'control', 'alt', 'tab', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'wheelup', 'wheeldown'].includes(key);
-  if (!allowed) {
-    throw new AppError(ErrorCode.BAD_REQUEST, 'Use a letter, number, Space, Shift, Control, Alt, Tab, or arrow key. Escape is reserved.');
+  const aliases = {
+    ' ': 'space',
+    spacebar: 'space',
+    ctrl: 'control',
+    esc: 'escape',
+    del: 'delete',
+    os: 'meta',
+    win: 'meta',
+  };
+  key = aliases[key] || key;
+  if (!key || key === 'escape') {
+    throw new AppError(ErrorCode.BAD_REQUEST, 'Escape is reserved and cannot be bound.');
   }
   return key;
 }
