@@ -49,8 +49,8 @@ test('page is served only with the run token', async () => {
     const ok = await fetch(ui.url);
     assert.equal(ok.status, 200);
     const html = await ok.text();
-    assert.match(html, /HEAVEN Mobile Control/);
-    assert.match(html, /MOCK TRANSPORT/);
+    assert.match(html, /HEAVEN MOBILE CONTROL|Heaven Mobile Control/);
+    assert.match(html, /Demo mode|No phone attached|Nothing will happen on a real phone/i);
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
     assert.equal(scripts.length, 1, 'controller page should contain its inline client');
     assert.doesNotThrow(() => new Function(scripts[0][1]), 'controller client should parse as JavaScript');

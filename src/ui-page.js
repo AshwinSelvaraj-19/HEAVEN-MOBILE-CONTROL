@@ -18,12 +18,16 @@ export function renderPage(options) {
   const { token, width, height, model, mock, screenAvailable = false, videoAvailable = false, mouseSensitivity = 1, screenWake = null } = options;
   const locked = Boolean(screenWake && screenWake.locked);
   const initialScreenMessage = mock
-    ? 'Mock mode is active. Connect your phone and run npm run live to see its screen.'
+    ? 'Demo mode — no phone attached. Connect your phone and run live mode to see the game screen here.'
     : locked
       ? 'Unlock your phone to show the live screen.'
-      : (screenAvailable ? 'Waiting for the phone screen�' : 'Phone screen preview is unavailable.');
-  const initialVideoStatus = videoAvailable ? 'Video starting � 90 fps target' : 'Screenshot preview';
-  const title = `HEAVEN Mobile Control � ${model || 'device'}`;
+      : (screenAvailable ? 'Connecting to your phone screen…' : 'Phone screen preview is not available yet.');
+  const initialVideoStatus = videoAvailable ? 'Starting live video…' : 'Preview mode';
+  const title = `Heaven Mobile Control — ${model || 'device'}`;
+  const tokenShort = escapeHtml(String(token || '').slice(0, 6));
+  const deviceLabel = escapeHtml(model || 'Phone');
+  const statusLabel = mock ? 'Demo mode — no phone attached' : `Phone connected — ${deviceLabel}`;
+  const statusDot = mock ? 'warn' : 'ok';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -31,353 +35,278 @@ export function renderPage(options) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <style>
-  :root {
-    color-scheme: dark;
-    --bg: #090d14;
-    --panel: #111824;
-    --panel-2: #182333;
-    --line: #26364a;
-    --text: #edf3fb;
-    --muted: #91a2b8;
-    --accent: #62b2ff;
-    --accent-2: #70dfa3;
-    --danger: #ff7676;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-  header { height: 66px; flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 22px; border-bottom: 1px solid var(--line); background: #101722; box-shadow: 0 6px 24px #0003; z-index: 4; }
-  .brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid #3476b6; border-radius: 10px; color: #a8d8ff; background: #122b43; font-size: 16px; font-weight: 800; }
-  .brand-copy { min-width: 205px; }
-  header h1 { font-size: 13px; margin: 0; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
-  .brand-copy small { display: block; color: var(--muted); font-size: 11px; }
-  .pill { white-space: nowrap; padding: 4px 10px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); color: var(--muted); background: #0c121b; }
-  .pill.ok { border-color: #1f6f3f; color: var(--accent-2); background: #0e2a19; }
-  .pill.bad { border-color: #6f1f1f; color: var(--danger); background: #2a0e0e; }
-  .spacer { flex: 1; }
-  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 410px; gap: 0; min-height: 0; }
-  .preview-column { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-  .preview-head { min-height: 54px; flex: none; display: flex; align-items: center; gap: 12px; padding: 7px 22px; border-bottom: 1px solid #1e2a3a; background: #0d131d; }
-  .preview-head strong { display: block; font-size: 13px; }
-  .preview-head small { color: var(--muted); font-size: 11px; }
-  .landscape-pill { margin-left: 0; color: #a8d8ff; border: 1px solid #29445f; border-radius: 20px; padding: 4px 10px; font-size: 11px; white-space: nowrap; }
-  .layout-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-  .layout-actions button { padding: 7px 10px; font-size: 11px; }
-  .layout-actions button.active { border-color: #c39b31; background: #3a2e14; color: #ffe69a; }
-  #layout-status { font-size: 11px; color: #f4d783; min-width: 90px; }
-  .stage-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; min-height: 0; background: radial-gradient(ellipse at 50% 42%, #162337 0%, #0b1019 62%, #090d14 100%); }
-  #stage {
-    position: relative; flex: none; aspect-ratio: ${width} / ${height};
-    background: #05070a; border: 1px solid #304257; border-radius: 12px;
-    overflow: hidden; cursor: default; touch-action: none;
-    box-shadow: 0 24px 70px rgba(0,0,0,.58), 0 0 0 1px #ffffff08;
-  }
-  #stage .grid { position: absolute; inset: 0;
-    background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
-    background-size: 10% 10%; opacity: .25; pointer-events: none; }
-  #phone-screen { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: none; z-index: 1; }
-  #phone-video { position: absolute; inset: 0; width: 100%; height: 100%; display: none; pointer-events: none; z-index: 1; }
-  #screen-message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 22px; text-align: center; color: var(--muted); font-size: 13px; z-index: 1; pointer-events: none; }
-  .marker { position: absolute; transform: translate(-50%, -50%); pointer-events: none; transition: none; z-index: 2; }
-  .marker .dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; opacity: .9; }
-  .marker .ring { position: absolute; inset: -12px; border-radius: 50%; border: 1px dashed currentColor; opacity: .45; }
-  .marker .label { position: absolute; left: 16px; top: -10px; font-size: 10px; letter-spacing: .08em; color: currentColor; white-space: nowrap; }
-  .marker[data-name="A"] { color: var(--accent); }
-  .marker[data-name="B"] { color: var(--accent-2); }
-  .hud-target { position: absolute; z-index: 3; transform: translate(-50%, -50%); pointer-events: none; color: #ffe082; font-size: 10px; font-weight: 700; text-shadow: 0 1px 4px #000, 1px 0 #000, -1px 0 #000; }
-  #stage.layout-editing .hud-target { pointer-events: auto; cursor: grab; touch-action: none; padding: 4px; border: 1px solid transparent; border-radius: 8px; }
-  #stage.layout-editing .hud-target:active { cursor: grabbing; }
-  #stage.layout-editing .hud-target.selected { border-color: #fff2a8; background: #17202dcc; box-shadow: 0 0 0 2px #1118, 0 0 18px #ffd34d88; }
-  .hud-target i { display: block; width: 18px; height: 18px; border: 1px solid #ffe082; border-radius: 50%; background: #ffce3a33; }
-  .hud-target b { display: block; white-space: nowrap; text-align: center; }
-  .hud-target.ghost { opacity: .85; }
-  #aim-crosshair { position: absolute; z-index: 4; transform: translate(-50%, -50%); pointer-events: none; display: none; }
-  .inspector-box { border: 1px solid var(--line); border-radius: 10px; background: #0e1520; margin-top: 10px; padding: 10px; }
-  .inspector-box h3 { margin: 0 0 8px; font-size: 12px; color: var(--text); text-transform: uppercase; letter-spacing: .05em; }
-  .inspector-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; font-size: 12px; color: #b5c4d6; }
-  .inspector-row input[type="text"], .inspector-row input[type="number"], .inspector-row select { width: 140px; background: #0b121c; color: var(--text); border: 1px solid #2d4055; border-radius: 7px; padding: 7px 8px; font: inherit; outline: none; }
-  .inspector-row input.capturing { border-color: #ff0000; box-shadow: 0 0 0 2px #ff000033; color: #ffd479; }
-  .inspector-hint { font-size: 11px; color: var(--muted); }
-  .inspector-status { font-size: 11px; color: #f4d783; min-height: 16px; margin-top: 6px; }
-  .inspector-status.error { color: var(--danger); }
-  .aim-modal-backdrop { position: fixed; inset: 0; background: #0008; z-index: 30; display: none; align-items: center; justify-content: center; padding: 16px; }
-  .aim-modal-backdrop.open { display: flex; }
-  .aim-modal { width: min(760px, 100%); max-height: 92vh; overflow: auto; background: #0d0d0d; color: #fff; border: 1px solid #333; border-radius: 10px; box-shadow: 0 24px 80px #000c; }
-  .aim-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #2a2a2a; }
-  .aim-modal-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
-  .aim-close { width: 34px; height: 34px; border-radius: 6px; border: 1px solid #333; background: #151515; color: #fff; font-size: 18px; cursor: pointer; }
-  .aim-tabs { display: flex; gap: 18px; padding: 0 16px; border-bottom: 1px solid #2a2a2a; }
-  .aim-tab { padding: 10px 2px; font-size: 14px; color: #bbb; cursor: pointer; border-bottom: 2px solid transparent; }
-  .aim-tab.active { color: #fff; border-bottom-color: #ff0000; }
-  .aim-body { padding: 14px 16px 18px; }
-  .aim-section { margin: 14px 0; }
-  .aim-section-head { display: flex; align-items: center; justify-content: space-between; font-size: 16px; font-weight: 700; margin: 0 0 10px; }
-  .aim-row { display: grid; grid-template-columns: 1fr 170px; gap: 10px; align-items: center; margin: 8px 0; font-size: 14px; color: #e6e6e6; }
-  .aim-row input[type="text"], .aim-row input[type="number"], .aim-row select { width: 100%; background: #1a1a1a; color: #fff; border: 1px solid #3a3a3a; border-radius: 6px; padding: 8px 10px; font: inherit; }
-  .aim-row input.capturing { border-color: #ff0000; box-shadow: 0 0 0 2px #ff000033; }
-  .aim-switch { position: relative; width: 46px; height: 24px; border-radius: 999px; background: #444; cursor: pointer; border: 1px solid #555; }
-  .aim-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; }
-  .aim-switch.on { background: #ff0000; border-color: #aa0000; }
-  .aim-switch.on::after { left: 24px; }
-  .aim-instruction { color: #ff0000; font-size: 13px; margin: 6px 0 10px; display: flex; align-items: center; gap: 6px; }
-  .aim-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; padding-top: 12px; border-top: 1px solid #2a2a2a; color: #ddd; font-size: 13px; }
-  .aim-trash { width: 34px; height: 34px; border: 1px solid #442222; background: #1a0d0d; color: #ff5555; border-radius: 6px; cursor: pointer; font-size: 16px; }
-  .aim-place-btn { margin: 4px 0 8px; padding: 7px 10px; font-size: 12px; border: 1px solid #5a2a2a; background: #221010; color: #ffd6d6; border-radius: 7px; cursor: pointer; }
-  .aim-place-btn.armed { border-color: #ff0000; color: #fff; background: #3a1010; }
-  .color-wrap { display: flex; align-items: center; gap: 8px; }
-  .color-swatch { width: 26px; height: 26px; border-radius: 4px; border: 1px solid #555; cursor: pointer; padding: 0; }
-  aside { border-left: 1px solid var(--line); background: #101722; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 18px; gap: 12px; }
-  .group { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, #151f2d, #111824 65%); box-shadow: 0 8px 22px #0002; }
-  .group h2 { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text); margin: 0 0 12px; letter-spacing: .01em; }
-  .step-number { width: 23px; height: 23px; display: inline-grid; place-items: center; border-radius: 8px; color: #c8e6ff; background: #173550; font-size: 11px; }
-  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  button { font: inherit; font-size: 12px; font-weight: 600; padding: 9px 12px; border-radius: 8px; cursor: pointer; background: var(--panel-2); color: var(--text); border: 1px solid #31445b; transition: background .15s, border-color .15s, transform .15s; }
-  button:hover:not(:disabled) { border-color: #5485b8; background: #203148; transform: translateY(-1px); }
-  button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-  button.primary { border-color: #327ab8; background: linear-gradient(135deg, #1e6bab, #174c7d); color: #f1f8ff; }
-  button.danger { border-color: #7a3030; background: #321719; color: #ffc9c9; font-weight: 700; }
-  button.wide { width: 100%; }
-  label.field { display: flex; align-items: center; justify-content: space-between; gap: 9px; font-size: 12px; color: #b5c4d6; }
-  input[type="number"], .binding-input { min-width: 0; background: #0b121c; color: var(--text); border: 1px solid #2d4055; border-radius: 7px; padding: 8px 9px; font: inherit; outline: none; }
-  input[type="number"]:focus, .binding-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #4da3ff22; }
-  .km-toggle { display: flex; gap: 8px; margin: 10px 0 0; }
-  .km-toggle button { flex: 1; padding: 12px 8px; font-size: 12px; border-radius: 10px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
-  .km-toggle button.active { border-color: var(--accent); background: #1e4a73; color: #d7eaff; }
-  .km-panel { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); margin-top: 10px; padding: 10px; display: none; }
-  .km-panel.open { display: block; }
-  .km-panel h3 { margin: 0 0 8px; font-size: 13px; color: var(--text); text-transform: uppercase; letter-spacing: .06em; }
-  .km-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .km-tile { border: 1px solid var(--line); border-radius: 10px; background: #0e1520; padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 600; color: var(--text); cursor: grab; user-select: none; transition: border-color .15s, background .15s; }
-  .km-tile:hover { border-color: var(--accent); background: #1a2a40; }
-  .km-tile.placing { border-color: #f4d783; background: #3a2e14; box-shadow: 0 0 0 1px #f4d78355; }
-  .km-tile .icon { font-size: 18px; line-height: 1; margin-bottom: 6px; display: block; }
-  .km-hint { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
-  #stage.layout-editing { cursor: crosshair; }
-  #stage.placing-control { cursor: copy; }
-  .tap-ripple { position:absolute; width:34px; height:34px; margin:-17px 0 0 -17px; border:2px solid rgba(131,255,201,.95); border-radius:50%; background:rgba(131,255,201,.18); pointer-events:none; z-index:12; transform:scale(.3); opacity:1; animation:tap-ripple .45s ease-out forwards; box-shadow:0 0 0 2px rgba(0,0,0,.2) inset; }
-  @keyframes tap-ripple { to { transform:scale(1.8); opacity:0; } }
-  .hud-target { cursor: grab; }
-  .kv { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 3px 0; }
-  .kv b { color: var(--text); font-weight: 650; }
-  #log { max-height: 180px; overflow: auto; padding: 8px 0 0; font: 11px/1.5 ui-monospace, Consolas, monospace; color: var(--muted); min-height: 0; }
-  #log div { white-space: pre-wrap; word-break: break-word; }
-  #log .warn { color: #ffcf70; }
-  #log .error { color: var(--danger); }
-  #log .info { color: #9fb4d0; }
-  footer { padding: 8px 2px 0; font-size: 10px; color: var(--muted); display: flex; gap: 8px; }
-  .hint { font-size: 11px; color: var(--muted); margin: 9px 0 0; }
-  .banner { background: #2a1f0b; border-bottom: 1px solid #5c4312; color: #ffd479; padding: 6px 16px; font-size: 12px; display: ${mock ? 'block' : 'none'}; }
-  @media (max-width: 1000px) { main { grid-template-columns: minmax(0,1fr) 360px; } header { padding-inline: 14px; gap: 8px; } .brand-copy { min-width: 175px; } }
-  @media (max-width: 780px) { body { height: auto; min-height: 100vh; overflow: auto; } header { min-height: 62px; height: auto; flex-wrap: wrap; } main { display: flex; flex-direction: column; } .preview-column { min-height: 55vh; } .preview-head { padding-inline: 14px; } .stage-wrap { min-height: 48vh; padding: 12px; } aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; padding: 12px; } .brand-copy { min-width: 0; } }
-
-
-  .settings-btn { padding: 8px 12px; font-size: 12px; border: 1px solid #31445b; background: var(--panel-2); color: var(--text); border-radius: 8px; cursor: pointer; }
-  .settings-btn:hover { border-color: #5485b8; background: #203148; }
-  .settings-backdrop { position: fixed; inset: 0; background: #0008; z-index: 40; display: none; align-items: flex-start; justify-content: center; padding: 24px 16px; overflow: auto; }
-  .settings-backdrop.open { display: flex; }
-  .settings-panel { width: min(560px, 100%); background: #101722; color: var(--text); border: 1px solid #2b3b50; border-radius: 12px; box-shadow: 0 24px 80px #000c; }
-  .settings-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #223145; }
-  .settings-head h2 { margin: 0; font-size: 16px; }
-  .settings-close { width: 32px; height: 32px; border-radius: 6px; border: 1px solid #31445b; background: #182333; color: #fff; font-size: 18px; cursor: pointer; }
-  .settings-body { padding: 14px 16px 18px; display: grid; gap: 14px; }
-  .settings-section { border: 1px solid #223145; border-radius: 10px; background: #0d1420; padding: 12px; }
-  .settings-section h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #d6e3f3; }
-  .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; font-size: 13px; color: #c4d3e5; flex-wrap: wrap; }
-  .settings-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .settings-note { font-size: 11px; color: var(--muted); margin-top: 6px; }
-  .settings-status { font-size: 12px; color: #9fd4ff; margin-top: 8px; min-height: 18px; white-space: pre-wrap; }
-  .settings-status.error { color: var(--danger); }
-  .settings-status.ok { color: var(--accent-2); }
-  .settings-range { width: 180px; }
-  .settings-inline { display: flex; align-items: center; gap: 8px; }
-  .settings-toggle { width: 44px; height: 24px; border-radius: 999px; border: 1px solid #3a4f68; background: #253447; position: relative; cursor: pointer; }
-  .settings-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #dce8f5; transition: left .15s; }
-  .settings-toggle.on { background: #1e6bab; border-color: #327ab8; }
-  .settings-toggle.on::after { left: 22px; }
-  .settings-toggle.disabled { opacity: .45; cursor: not-allowed; }
-  .settings-confirm { margin-top: 8px; padding: 8px; border: 1px solid #2b3b50; border-radius: 8px; background: #111b29; font-size: 12px; color: #cfe0f5; }
-
+  :root { color-scheme: dark; --bg:#0b1220; --bg-soft:#101827; --panel:#131c2e; --panel-2:#182238; --panel-3:#1e2a42; --line:#24324a; --line-strong:#334766; --text:#f8fafc; --text-muted:#b7c3d9; --text-faint:#8494b0; --accent:#2563eb; --accent-hover:#3b82f6; --accent-soft:rgba(37,99,235,.16); --accent-contrast:#ffffff; --ok:#22c55e; --ok-soft:rgba(34,197,94,.14); --warn:#f59e0b; --warn-soft:rgba(245,158,11,.14); --danger:#ef4444; --danger-hover:#f87171; --danger-soft:rgba(239,68,68,.14); --shadow:0 18px 40px rgba(2,8,23,.45); --shadow-sm:0 4px 14px rgba(2,8,23,.28); --radius:12px; --mono:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace; --sans:"Segoe UI Variable","Segoe UI",Inter,system-ui,-apple-system,sans-serif; }
+  *{box-sizing:border-box} html,body{height:100%} body{margin:0;font:14px/1.5 var(--sans);color:var(--text);background:radial-gradient(ellipse at top,#111a2e 0%,var(--bg) 55%);display:flex;flex-direction:column;overflow:hidden}
+  h1,h2,h3,p{margin:0} button,input,select,textarea{font:inherit;color:inherit} button{cursor:pointer} :focus-visible{outline:2px solid rgba(59,130,246,.7);outline-offset:2px}
+  .topbar{height:60px;flex:none;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line);background:rgba(11,18,32,.88);backdrop-filter:blur(8px)}
+  .brand{display:flex;align-items:center;gap:10px;min-width:0}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#60a5fa);color:#fff;display:grid;place-items:center;font-weight:800;font-size:16px;flex:none}
+  .brand-copy .name{font-size:14px;font-weight:700;letter-spacing:.02em}.brand-copy .tag{font-size:11px;color:var(--text-muted)}
+  .conn{display:inline-flex;align-items:center;gap:8px;margin-left:10px;padding:6px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--text-muted);font-size:12px;white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 4px var(--warn-soft)} .dot.ok{background:var(--ok);box-shadow:0 0 0 4px var(--ok-soft)}
+  .mode-badge{justify-self:center;padding:6px 14px;border-radius:999px;font-size:13px;font-weight:700;letter-spacing:.08em;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--text-muted)}
+  .mode-badge.playing{background:var(--ok-soft);color:var(--ok);border-color:rgba(34,197,94,.35)}
+  .top-actions{justify-self:end;display:flex;align-items:center;gap:8px}
+  .btn,button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 14px;border-radius:10px;border:1px solid var(--line-strong);background:var(--panel-2);color:var(--text);font-size:14px;font-weight:600}
+  .btn:hover:not(:disabled),button:hover:not(:disabled){background:var(--panel-3)} .btn:disabled,button:disabled{opacity:.5;cursor:not-allowed}
+  .btn.primary,button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-contrast)} .btn.primary:hover:not(:disabled),button.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+  .btn.danger,button.danger{background:var(--danger-soft);border-color:rgba(239,68,68,.35);color:#fecaca} .btn.ghost{background:transparent;border-color:var(--line);color:var(--text-muted)}
+  .demo-banner{flex:none;padding:8px 16px;font-size:13px;font-weight:600;color:#fde68a;background:var(--warn-soft);border-bottom:1px solid rgba(245,158,11,.25);display:${mock ? 'block' : 'none'}}
+  main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 380px} .stage-col{min-width:0;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--line)}
+  .guide{flex:none;margin:14px 16px 0;padding:12px 14px;border-radius:var(--radius);border:1px solid var(--line);background:var(--panel);box-shadow:var(--shadow-sm)}
+  .guide-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.guide-head h2{font-size:14px;font-weight:700}
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.step{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line);color:var(--text-muted);font-size:13px}
+  .step .n{width:24px;height:24px;border-radius:7px;background:var(--accent-soft);color:#93c5fd;display:grid;place-items:center;font-weight:700;font-size:12px;flex:none}
+  .step.done{border-color:rgba(34,197,94,.35);color:#bbf7d0;background:rgba(34,197,94,.08)} .step.done .n{background:var(--ok-soft);color:var(--ok)}
+  .phone-wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:16px}.stage-wrap{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+  #stage{position:relative;flex:none;aspect-ratio:${width} / ${height};max-width:100%;max-height:100%;background:#050913;border:8px solid #1f2937;border-radius:26px;overflow:hidden;box-shadow:0 30px 60px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.04);touch-action:none}
+  #stage .grid{position:absolute;inset:0;background-image:linear-gradient(rgba(148,163,184,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,.08) 1px,transparent 1px);background-size:10% 10%;opacity:.35;pointer-events:none;z-index:1}
+  #phone-video,#phone-screen{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;pointer-events:none;z-index:2;background:#020617}
+  #screen-message{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:28px;text-align:center;color:#e2e8f0;font-size:15px;line-height:1.5;z-index:2;pointer-events:none;background:radial-gradient(ellipse at center,rgba(15,23,42,.4),rgba(2,6,23,.85))}
+  #screen-message .phone-icon{font-size:42px;line-height:1} #screen-message .steps-list{font-size:13px;color:#cbd5e1;line-height:1.7}
+  .hud-target{position:absolute;z-index:4;transform:translate(-50%,-50%);pointer-events:none;color:#fff;text-align:center;filter:drop-shadow(0 2px 6px rgba(0,0,0,.6))}
+  .hud-target .cap{width:44px;height:44px;border-radius:50%;margin:0 auto;background:rgba(37,99,235,.92);border:2px solid rgba(255,255,255,.95);display:grid;place-items:center;font-size:13px;font-weight:700}
+  .hud-target .lbl{margin-top:4px;font-size:11px;font-weight:600;color:#e2e8f0;text-shadow:0 1px 3px #000;white-space:nowrap}
+  #stage.layout-editing .hud-target,body.mode-setup .hud-target{pointer-events:auto;cursor:grab} #stage.layout-editing .hud-target:active{cursor:grabbing}
+  .hud-target.selected .cap{box-shadow:0 0 0 3px #fff,0 0 0 6px var(--accent)}
+  .hud-target i,.hud-target b{display:none}
+  .marker{position:absolute;z-index:3;transform:translate(-50%,-50%);pointer-events:none;color:#22c55e}
+  .marker .dot{width:12px;height:12px;border-radius:50%;border:2px solid currentColor;background:rgba(34,197,94,.3)}
+  .marker .ring{position:absolute;inset:-10px;border-radius:50%;border:1px dashed currentColor;opacity:.5}
+  .marker .label{position:absolute;left:14px;top:-10px;font-size:10px;font-weight:700;color:currentColor;text-shadow:0 1px 2px #000}
+  #aim-crosshair{position:absolute;z-index:5;transform:translate(-50%,-50%);pointer-events:none;display:none}
+  #stage.placing-control{cursor:crosshair}
+  .tap-ripple{position:absolute;width:36px;height:36px;margin:-18px 0 0 -18px;border:2px solid rgba(59,130,246,.95);border-radius:50%;background:rgba(59,130,246,.2);pointer-events:none;z-index:12;transform:scale(.3);opacity:1;animation:tap-ripple .45s ease-out forwards}
+  @keyframes tap-ripple{to{transform:scale(1.9);opacity:0}}
+  .side{min-height:0;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px;background:var(--bg-soft)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow-sm)}
+  .card h2{font-size:16px;font-weight:700;margin-bottom:4px}.card .sub{font-size:13px;color:var(--text-muted);margin-bottom:12px}
+  .section-title{font-size:12px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 8px}
+  .preset-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}.preset-btn{min-height:44px;font-size:13px;padding:8px}
+  .control-grid{display:grid;grid-template-columns:1fr;gap:8px}
+  .km-tile.control-card{display:grid;grid-template-columns:40px 1fr;gap:10px;align-items:center;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);text-align:left;min-height:56px}
+  .km-tile.control-card:hover{border-color:var(--accent);background:var(--panel-3)} .km-tile.placing{border-color:var(--warn);background:var(--warn-soft)}
+  .km-tile .icon{width:36px;height:36px;border-radius:10px;background:var(--accent-soft);color:#93c5fd;display:grid;place-items:center;font-size:18px;margin:0}
+  .km-tile .text{display:flex;flex-direction:column} .km-tile .text b{font-size:14px;font-weight:650;color:var(--text)} .km-tile .text .desc{font-size:12px;color:var(--text-muted);margin-top:2px;line-height:1.35}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel-2);color:var(--text-muted);font-size:12px;font-weight:600}
+  .pill.ok{color:#bbf7d0;background:var(--ok-soft);border-color:rgba(34,197,94,.35)} .pill.bad{color:#fecaca;background:var(--danger-soft);border-color:rgba(239,68,68,.35)}
+  .status-line{font-size:13px;color:var(--text-muted);margin-top:8px;min-height:20px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap} .spacer{flex:1}
+  .play-summary{display:none} body.mode-play .setup-only{display:none !important} body.mode-play .play-summary{display:block}
+  .keycap{min-width:36px;height:36px;padding:0 10px;border-radius:8px;background:var(--panel-3);border:1px solid var(--line-strong);display:inline-grid;place-items:center;font-weight:700;font-size:13px;color:#fff}
+  .bottom-bar{flex:none;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line);background:rgba(11,18,32,.92);backdrop-filter:blur(8px)}
+  .bottom-bar .center{display:flex;flex-direction:column;align-items:center;gap:4px} .play-btn{min-width:220px;min-height:50px;font-size:16px;font-weight:700;border-radius:12px}
+  .bottom-status{font-size:13px;color:var(--text-muted);text-align:center} .bottom-left,.bottom-right{font-size:12px;color:var(--text-faint)}
+  input[type="text"],input[type="number"],select{width:100%;min-height:40px;padding:8px 10px;border-radius:10px;border:1px solid var(--line-strong);background:var(--bg-soft);color:var(--text)}
+  input[type="range"]{width:100%;accent-color:var(--accent)} input.capturing{border-color:var(--warn);background:var(--warn-soft)}
+  .kv{display:flex;justify-content:space-between;gap:8px;padding:6px 0;font-size:13px;color:var(--text-muted);border-bottom:1px dashed var(--line)} .kv:last-child{border-bottom:0} .kv b{color:var(--text);font-weight:600}
+  .inspector-status{font-size:13px;color:var(--text-muted);min-height:20px;margin-top:6px} .inspector-status.error{color:#fca5a5}
+  details.advanced{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  details.advanced>summary{list-style:none;cursor:pointer;padding:12px 14px;font-size:14px;font-weight:650;color:var(--text-muted);display:flex;align-items:center;justify-content:space-between}
+  details.advanced>summary::-webkit-details-marker{display:none} details.advanced[open]>summary{border-bottom:1px solid var(--line);color:var(--text)}
+  .advanced-body{padding:12px 14px} #log{max-height:180px;overflow:auto;padding:10px;border-radius:10px;background:#060a14;color:#cbd5e1;font:12px/1.5 var(--mono);border:1px solid #1e293b}
+  #log div{padding:1px 0;word-break:break-word} #log .error{color:#fca5a5} #log .warn{color:#fde68a} #log .info{color:#94a3b8}
+  .settings-backdrop,.aim-modal-backdrop{position:fixed;inset:0;background:rgba(2,6,23,.65);backdrop-filter:blur(4px);z-index:40;display:none;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto}
+  .settings-backdrop.open,.aim-modal-backdrop.open{display:flex}
+  .settings-panel,.aim-modal{width:min(560px,100%);background:var(--panel);color:var(--text);border:1px solid var(--line-strong);border-radius:16px;box-shadow:var(--shadow)}
+  .aim-modal{width:min(720px,100%);max-height:92vh;overflow:auto}
+  .settings-head,.aim-modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .settings-head h2,.aim-modal-head h2{font-size:18px;font-weight:700} .settings-close,.aim-close{width:36px;height:36px;padding:0;font-size:18px}
+  .settings-body{padding:14px 16px 18px;display:grid;gap:12px} .settings-section{border:1px solid var(--line);border-radius:12px;background:var(--panel-2);padding:12px}
+  .settings-section h3{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-faint);margin-bottom:10px}
+  .settings-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;font-size:14px;color:var(--text-muted);flex-wrap:wrap}
+  .settings-actions{display:flex;gap:8px;flex-wrap:wrap} .settings-status{font-size:13px;color:var(--text-muted);margin-top:8px;min-height:18px;white-space:pre-wrap}
+  .settings-status.error{color:#fca5a5} .settings-status.ok{color:#86efac}
+  .settings-toggle{width:46px;height:26px;border-radius:999px;border:1px solid var(--line-strong);background:var(--panel-3);position:relative;cursor:pointer;padding:0}
+  .settings-toggle::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
+  .settings-toggle.on{background:var(--accent);border-color:var(--accent)} .settings-toggle.on::after{left:22px} .settings-range{width:180px}
+  .aim-tabs{display:flex;gap:4px;padding:8px 16px 0;border-bottom:1px solid var(--line)} .aim-tab{padding:10px 14px;font-size:14px;color:var(--text-muted);border-bottom:2px solid transparent;cursor:pointer;font-weight:600}
+  .aim-tab.active{color:var(--text);border-bottom-color:var(--accent)} .aim-body{padding:14px 16px 18px}
+  .aim-section{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)} .aim-section:last-child{border-bottom:0;margin-bottom:0}
+  .aim-section-head{display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:700;margin-bottom:8px}
+  .aim-row{display:grid;grid-template-columns:1fr 180px;gap:10px;align-items:center;margin:8px 0;font-size:14px;color:var(--text-muted)}
+  .aim-switch{width:44px;height:24px;border-radius:999px;border:1px solid var(--line-strong);background:var(--panel-3);position:relative;cursor:pointer;padding:0}
+  .aim-switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s}
+  .aim-switch.on{background:var(--accent);border-color:var(--accent)} .aim-switch.on::after{left:22px}
+  .aim-place-btn.armed{border-color:var(--accent);background:var(--accent-soft);color:#bfdbfe}
+  .aim-footer{display:flex;align-items:center;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;color:var(--text-muted)}
+  .aim-trash{color:#fecaca;border-color:rgba(239,68,68,.35);background:var(--danger-soft)} .color-wrap{display:flex;align-items:center;gap:8px}
+  .color-swatch{width:36px;height:36px;border:1px solid var(--line);border-radius:8px;padding:0;background:var(--panel-2)}
+  .inspector-box{margin-top:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+  .inspector-box h3{font-size:12px;margin-bottom:8px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em}
+  .inspector-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;margin-bottom:8px;font-size:13px;color:var(--text-muted)} .inspector-row b{color:var(--text)}
+  .hidden-compat{display:none !important} .layout-actions{display:contents}
+  @media (max-width:980px){body{overflow:auto;height:auto;min-height:100vh}.topbar{grid-template-columns:1fr;height:auto;padding:10px 12px}.mode-badge,.top-actions{justify-self:start}main{grid-template-columns:1fr}.stage-col{border-right:0;border-bottom:1px solid var(--line);min-height:60vh}.side{overflow:visible}.steps{grid-template-columns:1fr}.bottom-bar{grid-template-columns:1fr}}
 </style>
 </head>
-<body>
-<header>
-  <div class="brand-mark">H</div>
-  <div class="brand-copy"><h1>Heaven Mobile Control</h1><small>Phone gaming controller</small></div>
-  <span class="pill" id="session-pill">connecting�</span>
-  <span class="pill" id="device-pill">${escapeHtml(model || 'unknown')} � ${width}&times;${height}</span>
-  <span class="pill" id="video-status">${escapeHtml(initialVideoStatus)}</span>
-  <span class="spacer"></span>
-  <button class="settings-btn" id="settings-open" type="button">Settings</button>
-  <button class="danger" id="panic">Release all � Esc</button>
+<body class="mode-setup" id="app-body">
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">H</div>
+    <div class="brand-copy"><div class="name">HEAVEN MOBILE CONTROL</div><div class="tag">Play your phone games on your laptop</div></div>
+    <div class="conn"><span class="dot ${statusDot}" id="conn-dot"></span><span id="conn-text">${statusLabel}</span></div>
+  </div>
+  <div class="mode-badge" id="mode-badge">SETUP</div>
+  <div class="top-actions">
+    <button class="btn ghost" id="help-btn" type="button" title="Show quick guide">Help</button>
+    <button class="btn settings-btn" id="settings-open" type="button">Settings</button>
+    <button class="btn danger" id="panic" type="button">Stop · Release all</button>
+  </div>
 </header>
-<div class="banner" id="mock-banner">MOCK TRANSPORT � no device attached; messages are counted, not injected.</div>
+<div class="demo-banner" id="mock-banner">Demo mode — no phone attached. Nothing will happen on a real phone.</div>
 <main>
-  <section class="preview-column" aria-label="Live phone preview">
-    <div class="preview-head"><div><strong>Live phone</strong><small>Drag imported controls to match your HUD</small></div><span class="landscape-pill">USB preview</span><div class="layout-actions"><span id="layout-status"></span><button id="layout-edit-toggle" type="button">Edit layout</button><button id="layout-delete" type="button" disabled>Delete</button></div></div>
-    <div class="stage-wrap">
-      <div id="stage" aria-label="Phone screen preview and touch test surface">
-        <div class="grid"></div>
-        <canvas id="phone-video" aria-label="Live Android phone video"></canvas>
-        <img id="phone-screen" alt="Live Android phone screen">
-        <div id="screen-message">${escapeHtml(initialScreenMessage)}</div>
-        <div id="aim-crosshair" aria-hidden="true"></div>
+  <section class="stage-col">
+    <div class="guide setup-only" id="setup-guide">
+      <div class="guide-head"><h2>Get ready to play</h2><button class="btn ghost" id="guide-dismiss" type="button" style="min-height:32px;padding:4px 10px;font-size:12px;">Dismiss</button></div>
+      <div class="steps">
+        <div class="step" id="step-connect"><span class="n">1</span><span><strong>Connect phone</strong><br><span style="color:var(--text-faint);font-size:12px;">USB cable and USB debugging on</span></span></div>
+        <div class="step" id="step-place"><span class="n">2</span><span><strong>Place controls</strong><br><span style="color:var(--text-faint);font-size:12px;">Pick a control and click the screen</span></span></div>
+        <div class="step" id="step-play"><span class="n">3</span><span><strong>Start playing</strong><br><span style="color:var(--text-faint);font-size:12px;">Press keys to tap and move</span></span></div>
+      </div>
+    </div>
+    <div class="phone-wrap">
+      <div class="stage-wrap">
+        <div id="stage" aria-label="Phone screen and controls">
+          <div class="grid"></div>
+          <canvas id="phone-video" aria-label="Live phone video"></canvas>
+          <img id="phone-screen" alt="Live phone screen">
+          <div id="screen-message"><div class="phone-icon">📱</div><div><strong>${mock ? 'No phone connected' : 'Connecting…'}</strong></div><div class="steps-list">${mock ? '1. Connect phone with USB<br>2. Turn on USB debugging<br>3. Run live mode' : escapeHtml(initialScreenMessage)}</div></div>
+          <div id="aim-crosshair" aria-hidden="true"></div>
+        </div>
       </div>
     </div>
   </section>
-  <aside aria-label="Controller setup">
-    <section class="group">
-      <h2><span class="step-number">1</span> Keymapping settings</h2>
-      <div class="km-toggle">
-        <button id="km-keyboard" type="button" class="active">Keyboard</button>
-        <button id="km-mouse" type="button">Mouse</button>
+  <aside class="side">
+    <section class="card setup-only" id="setup-panel">
+      <h2>Add controls</h2>
+      <p class="sub">Click a control, click the phone screen to place it, then press a key to assign it. Drag placed controls to move them. Click a placed control and press Delete to remove it.</p>
+      <div class="section-title">Quick presets</div>
+      <div class="preset-row">
+        <button class="btn preset-btn" id="preset-shooter" type="button">Shooter (FPS)</button>
+        <button class="btn preset-btn" id="preset-moba" type="button">MOBA</button>
+        <button class="btn preset-btn" id="preset-racing" type="button">Racing</button>
       </div>
-      <div class="km-panel open" id="km-keyboard-panel">
-        <h3>Keyboard actions</h3>
-        <div class="km-grid">
-          <div class="km-tile" data-km-type="tap"><span class="icon">?</span>Tap spot</div>
-          <div class="km-tile" data-km-type="repeat"><span class="icon">?</span>Repeated tap</div>
-          <div class="km-tile" data-km-type="dpad"><span class="icon">?</span>D-pad</div>
-          <div class="km-tile" data-km-type="aim"><span class="icon">?</span>Aim pan and shoot</div>
-          <div class="km-tile" data-km-type="freelook"><span class="icon">??</span>Free look</div>
-          <div class="km-tile" data-km-type="script"><span class="icon">??</span>Script</div>
-          <div class="km-tile" data-km-type="swipe"><span class="icon">?</span>Swipe</div>
-          <div class="km-tile" data-km-type="zoom"><span class="icon">??</span>Zoom</div>
-          <div class="km-tile" data-km-type="tilt"><span class="icon">?</span>Tilt</div>
-          <div class="km-tile" data-km-type="mobadpad"><span class="icon">?</span>MOBA D-pad</div>
-          <div class="km-tile" data-km-type="mobaskill"><span class="icon">??</span>MOBA Skill pad</div>
-          <div class="km-tile" data-km-type="rotate"><span class="icon">??</span>Rotate</div>
-          <div class="km-tile" data-km-type="edgescroll"><span class="icon">?</span>Edge scroll</div>
-          <div class="km-tile" data-km-type="scroll"><span class="icon">?</span>Scroll</div>
-          <div class="km-tile" data-km-type="mousewheel"><span class="icon">??</span>Mouse wheel</div>
-        </div>
-        <p class="km-hint">Drag a tile onto the phone screen (or tap a tile then click the screen) to place it. Click a placed control to select it, then click Key or press a key to assign/change it. Drag placed controls to reposition. Esc cancels capture/panic release.</p>
-        <div class="row" style="margin-top:8px;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button id="mapping-start" type="button" class="primary">Start mapping</button>
-          <span id="mapping-status" class="pill bad" style="font-size:11px;padding:4px 8px;">Mapping OFF — press Start mapping to play</span>
-        </div>
-        <div id="mapping-hint" class="inspector-status" style="margin:4px 0 8px;min-height:18px;"></div>
-        <span id="km-selected-info" class="hint" style="display:block;margin:0 0 6px;">No control selected</span>
-        <div class="inspector-box" id="control-inspector">
-          <h3>Selected control</h3>
-          <div class="inspector-row"><span>Type</span><b id="inspector-type">�</b></div>
-          <div class="inspector-row"><span>Key <span class="inspector-hint" id="inspector-key-hint">(click to set)</span></span><input id="inspector-key" type="text" readonly placeholder="Click to set key"></div>
-          <div class="row" style="margin-top:8px;gap:8px;">
-            <button id="inspector-aim-settings" type="button" style="display:none;">Aim settings</button>
-          </div>
-          <div id="inspector-status" class="inspector-status"></div>
-        </div>
-        <div class="kv"><span>Tap buttons placed</span><b id="km-tap-count">0</b></div>
-        <div class="kv"><span>Keys bound</span><b id="km-key-count">0</b></div>
+      <div class="section-title">Controls</div>
+      <div class="control-grid km-grid" id="control-grid">
+        <button class="km-tile control-card" data-km-type="tap" type="button"><span class="icon">●</span><span class="text"><b>Tap spot</b><span class="desc">Tap one spot when you press a key</span></span></button>
+        <button class="km-tile control-card" data-km-type="repeat" type="button"><span class="icon">↻</span><span class="text"><b>Repeated tap</b><span class="desc">Tap again and again while you hold the key</span></span></button>
+        <button class="km-tile control-card" data-km-type="dpad" type="button"><span class="icon">✚</span><span class="text"><b>D-pad</b><span class="desc">Move with WASD keys</span></span></button>
+        <button class="km-tile control-card" data-km-type="aim" type="button"><span class="icon">◎</span><span class="text"><b>Aim, pan and shoot</b><span class="desc">Move the mouse to look, left click to shoot</span></span></button>
+        <button class="km-tile control-card" data-km-type="freelook" type="button"><span class="icon">◉</span><span class="text"><b>Free look</b><span class="desc">Hold a key and move the mouse to look around</span></span></button>
+        <button class="km-tile control-card" data-km-type="swipe" type="button"><span class="icon">⇆</span><span class="text"><b>Swipe</b><span class="desc">Swipe in a direction when you press a key</span></span></button>
+        <button class="km-tile control-card" data-km-type="zoom" type="button"><span class="icon">⤢</span><span class="text"><b>Zoom</b><span class="desc">Pinch to zoom in or out</span></span></button>
+        <button class="km-tile control-card" data-km-type="mobadpad" type="button"><span class="icon">◌</span><span class="text"><b>MOBA D-pad</b><span class="desc">Move your character with keys in MOBA games</span></span></button>
+        <button class="km-tile control-card" data-km-type="mobaskill" type="button"><span class="icon">✦</span><span class="text"><b>MOBA skill pad</b><span class="desc">Aim and cast skills with a key</span></span></button>
+        <button class="km-tile control-card" data-km-type="rotate" type="button"><span class="icon">⟲</span><span class="text"><b>Rotate</b><span class="desc">Rotate the camera or object</span></span></button>
+        <button class="km-tile control-card" data-km-type="edgescroll" type="button"><span class="icon">▣</span><span class="text"><b>Edge scroll</b><span class="desc">Move the view when the mouse reaches the edge</span></span></button>
+        <button class="km-tile control-card" data-km-type="scroll" type="button"><span class="icon">⇳</span><span class="text"><b>Scroll</b><span class="desc">Scroll up and down with keys</span></span></button>
+        <button class="km-tile control-card" data-km-type="mousewheel" type="button"><span class="icon">◔</span><span class="text"><b>Mouse wheel</b><span class="desc">Use the mouse wheel as a control</span></span></button>
+        <button class="km-tile control-card" data-km-type="tilt" type="button"><span class="icon">∿</span><span class="text"><b>Tilt</b><span class="desc">Tilt control — coming soon</span></span></button>
+        <button class="km-tile control-card" data-km-type="script" type="button"><span class="icon">⌘</span><span class="text"><b>Script</b><span class="desc">Run a recorded set of taps — coming soon</span></span></button>
       </div>
-      <div class="km-panel" id="km-mouse-panel">
-        <h3>Mouse actions</h3>
-        <p class="km-hint">Mouse controls are active while mapping runs. X/Y are percentages (0–100, 2 dp). Changes save immediately and apply live while mapping is on.</p>
-        <div class="aim-row" style="grid-template-columns:1fr 90px 90px auto;gap:6px;margin:8px 0 2px;"><span>Aim anchor</span><input id="mouse-aim-x" type="number" min="0" max="100" step="0.01" value="50.00"><input id="mouse-aim-y" type="number" min="0" max="100" step="0.01" value="50.00"><button id="mouse-place-aim" type="button">Place</button></div>
-        <div class="aim-row" style="grid-template-columns:1fr 90px 90px auto;gap:6px;margin:6px 0 2px;"><span>Fire (left click)</span><input id="mouse-fire-x" type="number" min="0" max="100" step="0.01" value="75.26"><input id="mouse-fire-y" type="number" min="0" max="100" step="0.01" value="72.81"><button id="mouse-place-fire" type="button">Place</button></div>
-        <div class="aim-row" style="grid-template-columns:1fr 90px 90px auto;gap:6px;margin:6px 0 8px;"><span>Scope (right click)</span><input id="mouse-scope-x" type="number" min="0" max="100" step="0.01" value="85.00"><input id="mouse-scope-y" type="number" min="0" max="100" step="0.01" value="65.00"><button id="mouse-place-scope" type="button">Place</button></div>
-        <div class="aim-row" style="grid-template-columns:1fr 90px 90px;gap:6px;margin:8px 0 2px;"><span>Aim sensitivity X / Y</span><input id="mouse-sens-x" type="number" min="0.1" max="10" step="0.01" value="1.42"><input id="mouse-sens-y" type="number" min="0.1" max="10" step="0.01" value="1.46"></div>
-        <div class="kv" style="margin-top:4px;"><span>Aim sensitivity (avg)</span><b id="km-mouse-sensitivity">1.44</b></div>
-        <input type="range" min="0.1" max="10" step="0.01" value="1.44" style="width:100%;margin-top:6px;" id="km-mouse-range">
-        <div id="mouse-settings-status" class="inspector-status" style="margin-top:8px;min-height:18px;"></div>
+      <div class="section-title">Selected control</div>
+      <div class="inspector-box" id="control-inspector">
+        <h3>Selection</h3>
+        <div class="inspector-row"><span>Type</span><b id="inspector-type">—</b></div>
+        <div class="inspector-row"><span>Key <span class="inspector-hint" id="inspector-key-hint" style="color:var(--text-faint);font-size:11px;">(click to set)</span></span><input id="inspector-key" type="text" readonly placeholder="Click to set key"></div>
+        <div class="row" style="margin-top:8px;gap:8px;"><button id="inspector-aim-settings" type="button" class="btn" style="display:none;min-height:36px;">Aim settings</button><button id="layout-delete" type="button" class="btn danger" disabled style="min-height:36px;">Delete control</button></div>
+        <div id="inspector-status" class="inspector-status"></div>
       </div>
+      <div style="margin-top:10px;" class="kv"><span>Controls placed</span><b id="km-tap-count">0</b></div>
+      <div class="kv"><span>Keys set</span><b id="km-key-count">0</b></div>
+      <div class="status-line" id="setup-status">Click a control on the right, then click the screen to place it.</div>
     </section>
-    <section class="group advanced">
-      <summary>Diagnostics</summary>
-      <div class="kv"><span>active pointers</span><b id="k-count">0</b></div>
-      <div class="kv"><span>messages sent</span><b id="k-messages">0</b></div>
-      <div class="kv"><span>panics</span><b id="k-panics">0</b></div>
-      <div class="kv"><span>achieved Hz</span><b id="k-hz">�</b></div>
-      <div class="kv"><span>last proof</span><b id="k-proof">�</b></div>
-      <div class="kv"><span>video connected</span><b id="k-video-connected">�</b></div>
-      <div class="kv"><span>video frames</span><b id="k-video-frames">0</b></div>
-      <div class="kv"><span>keyframe</span><b id="k-video-keyframe">�</b></div>
-      <div class="kv"><span>codec</span><b id="k-video-codec">�</b></div>
-      <div class="kv"><span>video error</span><b id="k-video-error">�</b></div>
-      <div class="kv"><span>server error</span><b id="k-server-error">�</b></div>
-      <div id="log"></div>
+    <section class="card play-summary" id="play-panel">
+      <h2>You are playing</h2>
+      <p class="sub">Your keyboard and mouse now control the phone. Press <strong>Esc</strong> to stop and return to setup.</p>
+      <div class="status-line" id="play-hint">Left click fires at your Fire point when aiming. Click taps where you click when mapping is off.</div>
+      <div class="section-title">Mouse speed</div>
+      <div class="row" style="justify-content:space-between;font-size:13px;color:var(--text-muted);"><span>Look speed</span><b id="km-mouse-sensitivity" style="color:var(--text);">Normal</b></div>
+      <input type="range" min="0.1" max="10" step="0.01" value="1.44" id="km-mouse-range" style="margin:8px 0 4px;">
+      <div class="row" style="justify-content:space-between;font-size:12px;color:var(--text-faint);"><span>Slow</span><span>Normal</span><span>Fast</span></div>
+      <div class="section-title">Keys you have set</div>
+      <div id="play-keys-summary" class="status-line">No keys set yet.</div>
     </section>
-    <footer>
-      <span id="f-note">Controls run only while mapping is active.</span><span class="spacer"></span><span id="f-token">${escapeHtml(token.slice(0, 6))}�</span>
-    </footer>
+    <details class="advanced setup-only" id="advanced-details">
+      <summary><span>Advanced</span><span style="font-size:12px;color:var(--text-faint);">Connection and details</span></summary>
+      <div class="advanced-body">
+        <div class="section-title">Connection</div>
+        <div class="kv"><span>Session</span><b id="session-pill">Connecting…</b></div>
+        <div class="kv"><span>Device</span><b id="device-pill">${deviceLabel} · ${width}×${height}</b></div>
+        <div class="kv"><span>Video</span><b id="video-status">${escapeHtml(initialVideoStatus)}</b></div>
+        <div class="kv"><span>Controls</span><b id="conn-controls">Ready</b></div>
+        <div class="section-title">Layout</div>
+        <div class="row" style="margin-bottom:8px;"><button id="layout-edit-toggle" type="button" class="btn" style="min-height:36px;">Edit layout</button><span id="layout-status" style="font-size:12px;color:var(--text-muted);"></span></div>
+        <div class="section-title">Mouse positions and sensitivity (advanced)</div>
+        <div class="row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;font-size:12px;color:var(--text-faint);"><span>Aim X / Y %</span><input id="mouse-aim-x" type="number" min="0" max="100" step="0.01" value="50.00"><input id="mouse-aim-y" type="number" min="0" max="100" step="0.01" value="50.00"></div>
+        <div class="row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;font-size:12px;color:var(--text-faint);"><span>Fire X / Y %</span><input id="mouse-fire-x" type="number" min="0" max="100" step="0.01" value="75.26"><input id="mouse-fire-y" type="number" min="0" max="100" step="0.01" value="72.81"></div>
+        <div class="row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;font-size:12px;color:var(--text-faint);"><span>Scope X / Y %</span><input id="mouse-scope-x" type="number" min="0" max="100" step="0.01" value="85.00"><input id="mouse-scope-y" type="number" min="0" max="100" step="0.01" value="65.00"></div>
+        <div class="row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;font-size:12px;color:var(--text-faint);"><span>Look speed X / Y</span><input id="mouse-sens-x" type="number" min="0.1" max="10" step="0.01" value="1.42"><input id="mouse-sens-y" type="number" min="0.1" max="10" step="0.01" value="1.46"></div>
+        <div class="row" style="gap:6px;margin-bottom:8px;"><button id="mouse-place-aim" type="button" class="btn" style="min-height:32px;font-size:12px;">Place Aim</button><button id="mouse-place-fire" type="button" class="btn" style="min-height:32px;font-size:12px;">Place Fire</button><button id="mouse-place-scope" type="button" class="btn" style="min-height:32px;font-size:12px;">Place Scope</button></div>
+        <div id="mouse-settings-status" class="inspector-status"></div>
+        <div class="section-title">Diagnostics</div>
+        <div class="kv"><span>Active pointers</span><b id="k-count">0</b></div>
+        <div class="kv"><span>Messages sent</span><b id="k-messages">0</b></div>
+        <div class="kv"><span>Panics</span><b id="k-panics">0</b></div>
+        <div class="kv"><span>Achieved Hz</span><b id="k-hz">—</b></div>
+        <div class="kv"><span>Last proof</span><b id="k-proof">—</b></div>
+        <div class="kv"><span>Video connected</span><b id="k-video-connected">—</b></div>
+        <div class="kv"><span>Video frames</span><b id="k-video-frames">0</b></div>
+        <div class="kv"><span>Keyframe</span><b id="k-video-keyframe">—</b></div>
+        <div class="kv"><span>Codec</span><b id="k-video-codec">—</b></div>
+        <div class="kv"><span>Video error</span><b id="k-video-error">—</b></div>
+        <div class="kv"><span>Server error</span><b id="k-server-error">—</b></div>
+        <div id="log" aria-label="Event log" style="margin-top:8px;"></div>
+      </div>
+    </details>
   </aside>
 </main>
-
-
+<div class="bottom-bar">
+  <div class="bottom-left"><span id="f-note">Setup: place controls, then start playing.</span></div>
+  <div class="center"><button class="btn primary play-btn" id="mapping-start" type="button">▶ Start playing</button><div class="bottom-status" id="bottom-status">Ready — place controls and set keys</div></div>
+  <div class="bottom-right" style="text-align:right;"><span id="f-token" style="font-family:var(--mono);font-size:11px;color:var(--text-faint);">${tokenShort}…</span></div>
+</div>
+<div class="hidden-compat" aria-hidden="true">
+  <div id="km-keyboard" class="active"></div><div id="km-mouse"></div>
+  <div id="km-keyboard-panel" class="km-panel open"></div><div id="km-mouse-panel" class="km-panel"></div>
+  <span id="km-selected-info"></span><span id="mapping-status" class="pill bad">Mapping OFF</span>
+  <div id="mapping-hint" class="inspector-status"></div><div id="tap-status" class="inspector-status"></div><div id="play-mode-info"></div>
+</div>
 <div id="settings-backdrop" class="settings-backdrop" aria-hidden="true">
   <div class="settings-panel" role="dialog" aria-label="Settings">
     <div class="settings-head"><h2>Settings</h2><button id="settings-close" class="settings-close" type="button" aria-label="Close settings">×</button></div>
     <div class="settings-body">
-      <section class="settings-section" aria-label="Presets">
-        <h3>Presets</h3>
-        <div class="settings-actions">
-          <button id="preset-import-btn" type="button">Import preset</button>
-          <button id="preset-export-btn" type="button">Export preset</button>
-          <input id="preset-file-input" type="file" accept=".json,application/json" style="display:none">
-        </div>
-        <div id="preset-import-confirm" class="settings-confirm" style="display:none;"></div>
-        <div class="settings-actions" id="preset-apply-row" style="display:none;margin-top:8px;">
-          <button id="preset-apply-btn" type="button" class="primary">Apply preset</button>
-        </div>
-        <div id="preset-status" class="settings-status"></div>
+      <section class="settings-section" aria-label="Layout"><h3>Save and load layout</h3><p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">Save your controls and keys to a file, or load a layout you saved before.</p>
+        <div class="settings-actions"><button id="preset-import-btn" type="button" class="btn">Load a layout</button><button id="preset-export-btn" type="button" class="btn">Save my layout</button><input id="preset-file-input" type="file" accept=".json,application/json" style="display:none"></div>
+        <div id="preset-import-confirm" class="settings-confirm" style="display:none;"></div><div class="settings-actions" id="preset-apply-row" style="display:none;margin-top:8px;"><button id="preset-apply-btn" type="button" class="btn primary">Apply layout</button></div><div id="preset-status" class="settings-status"></div>
       </section>
-      <section class="settings-section" aria-label="Audio forwarding">
-        <h3>Audio forwarding</h3>
-        <div class="settings-row"><span>Play phone audio on this laptop</span><div id="audio-toggle" class="settings-toggle" role="switch" aria-checked="false" tabindex="0"></div></div>
-        <div class="settings-note">Needs one click to start — browsers block audio until you interact with the page.</div>
-        <div class="settings-row"><span>Volume</span><div class="settings-inline"><input id="audio-volume" class="settings-range" type="range" min="0" max="100" value="80"><span id="audio-volume-label">80</span></div></div>
-        <div class="settings-row"><span>Mute</span><button id="audio-mute-btn" type="button">Mute</button></div>
-        <div id="audio-status" class="settings-status">Audio forwarding is off.</div>
+      <section class="settings-section" aria-label="Audio"><h3>Phone audio</h3>
+        <div class="settings-row"><span>Play phone audio on this computer</span><div id="audio-toggle" class="settings-toggle" role="switch" aria-checked="false" tabindex="0"></div></div>
+        <div style="font-size:12px;color:var(--text-faint);margin:4px 0 8px;">You may need to click the page once before sound can play.</div>
+        <div class="settings-row"><span>Volume</span><div style="display:flex;align-items:center;gap:8px;"><input id="audio-volume" class="settings-range" type="range" min="0" max="100" value="80"><span id="audio-volume-label">80</span></div></div>
+        <div class="settings-row"><span>Mute</span><button id="audio-mute-btn" type="button" class="btn">Mute</button></div>
+        <div id="audio-status" class="settings-status">Phone audio is off.</div>
       </section>
+      <section class="settings-section" aria-label="About"><h3>Advanced info</h3><div style="font-size:13px;color:var(--text-muted);">Connection and diagnostics are in the Advanced section on the right. Video preview mode is used when live video is not available.</div></section>
     </div>
+  </div>
+</div>
+<div id="aim-modal-backdrop" class="aim-modal-backdrop" aria-hidden="true">
+  <div class="aim-modal" role="dialog" aria-label="Aim, look and shoot settings">
+    <div class="aim-modal-head"><h2>Aim, look and shoot</h2><button id="aim-close" class="aim-close" type="button" aria-label="Close">×</button></div>
+    <div class="aim-tabs"><div id="aim-tab-km" class="aim-tab active">Keyboard &amp; mouse</div><div id="aim-tab-gamepad" class="aim-tab">Gamepad</div></div>
+    <div class="aim-body" id="aim-body-km">
+      <section class="aim-section"><h3 class="aim-section-head">Keys</h3><div class="aim-row"><span>Start / stop aiming</span><input id="aim-start-stop" type="text" readonly></div><div class="aim-row"><span>Hold to look around</span><input id="aim-suspend" type="text" readonly></div></section>
+      <section class="aim-section"><h3 class="aim-section-head">Look speed</h3><div class="aim-row"><span>Look left / right speed</span><input id="aim-sens-x" type="number" step="0.01" min="0.1" max="10"></div><div class="aim-row"><span>Look up / down speed</span><input id="aim-sens-y" type="number" step="0.01" min="0.1" max="10"></div><div class="aim-row"><span>Fine tuning</span><input id="aim-tweaks" type="number" step="1"></div><div class="aim-row"><span>Mouse acceleration</span><select id="aim-accel"><option value="false">Off</option><option value="true">On</option></select></div></section>
+      <section class="aim-section"><h3 class="aim-section-head"><span>Crosshair</span><div id="aim-crosshair-toggle" class="aim-switch on" role="switch" aria-checked="true"></div></h3><div class="aim-row"><span>Style</span><select id="aim-crosshair-style"><option>Cross</option><option>Dot</option><option>Circle</option></select></div><div class="aim-row"><span>Size</span><input id="aim-crosshair-size" type="number" step="1" min="1" max="10"></div><div class="aim-row"><span>Opacity</span><input id="aim-crosshair-opacity" type="number" step="1" min="0" max="100"></div><div class="aim-row"><span>Color</span><div class="color-wrap"><input id="aim-crosshair-color-picker" class="color-swatch" type="color" value="#2563eb"><input id="aim-crosshair-color" type="text" value="#2563EB"></div></div></section>
+      <section class="aim-section"><h3 class="aim-section-head"><span>Fire with left click</span><div id="aim-fire-toggle" class="aim-switch on" role="switch" aria-checked="true"></div></h3><p style="font-size:13px;color:var(--text-muted);margin:4px 0 8px;">Place the fire point on the game's shoot button.</p><button id="aim-place-fire" class="aim-place-btn btn" type="button">Place fire point</button><div class="aim-row"><span>Fire action</span><select id="aim-fire-action"><option>LEFT CLICK</option><option>RIGHT CLICK</option><option>MIDDLE CLICK</option></select></div></section>
+      <section class="aim-section"><h3 class="aim-section-head"><span>Free look</span><div id="aim-look-toggle" class="aim-switch" role="switch" aria-checked="false"></div></h3><p style="font-size:13px;color:var(--text-muted);margin:4px 0 8px;">Optional: place a free-look point if your game needs it.</p><button id="aim-place-look" class="aim-place-btn btn" type="button">Place free look point</button></section>
+      <details class="advanced" style="margin-top:8px;"><summary><span>Advanced positions (percent)</span><span></span></summary><div class="advanced-body"><div class="aim-row"><span>Aim X (%)</span><input id="aim-x" type="number" step="0.01" min="0" max="100"></div><div class="aim-row"><span>Aim Y (%)</span><input id="aim-y" type="number" step="0.01" min="0" max="100"></div><div class="aim-row"><span>Fire X (%)</span><input id="aim-fire-x" type="number" step="0.01" min="0" max="100"></div><div class="aim-row"><span>Fire Y (%)</span><input id="aim-fire-y" type="number" step="0.01" min="0" max="100"></div><div class="aim-row"><span>Free look X (%)</span><input id="aim-look-x" type="number" step="0.01" min="-1" max="100"></div><div class="aim-row"><span>Free look Y (%)</span><input id="aim-look-y" type="number" step="0.01" min="-1" max="100"></div></div></details>
+      <div class="aim-footer"><span>Changes are saved automatically.</span><button id="aim-delete" class="aim-trash btn" type="button">Delete aim control</button></div><div id="aim-panel-status" class="inspector-status" style="margin-top:8px;"></div>
+    </div>
+    <div class="aim-body" id="aim-body-gamepad" style="display:none;"><p style="color:var(--text-muted);margin:8px 0;">Gamepad settings are not available yet.</p></div>
   </div>
 </div>
 
-<div id="aim-modal-backdrop" class="aim-modal-backdrop" aria-hidden="true">
-  <div class="aim-modal" role="dialog" aria-label="Aim, pan and shoot settings">
-    <div class="aim-modal-head"><h2>Aim, pan and shoot settings</h2><button id="aim-close" class="aim-close" type="button">?</button></div>
-    <div class="aim-tabs"><div id="aim-tab-km" class="aim-tab active">Keyboard and mouse</div><div id="aim-tab-gamepad" class="aim-tab">Gamepad</div></div>
-    <div class="aim-body" id="aim-body-km">
-      <section class="aim-section">
-        <h3 class="aim-section-head">Key bindings</h3>
-        <div class="aim-row"><span>Start/Stop</span><input id="aim-start-stop" type="text" readonly></div>
-        <div class="aim-row"><span>Suspend</span><input id="aim-suspend" type="text" readonly></div>
-      </section>
-      <section class="aim-section">
-        <h3 class="aim-section-head">Properties</h3>
-        <div class="aim-row"><span>X</span><input id="aim-x" type="number" step="0.01" min="0" max="100"></div>
-        <div class="aim-row"><span>Y</span><input id="aim-y" type="number" step="0.01" min="0" max="100"></div>
-        <div class="aim-row"><span>Mouse sensitivity X</span><input id="aim-sens-x" type="number" step="0.01" min="0.1" max="10"></div>
-        <div class="aim-row"><span>Mouse sensitivity Y</span><input id="aim-sens-y" type="number" step="0.01" min="0.1" max="10"></div>
-        <div class="aim-row"><span>Tweaks</span><input id="aim-tweaks" type="number" step="1"></div>
-        <div class="aim-row"><span>Mouse acceleration</span><select id="aim-accel"><option value="false">FALSE</option><option value="true">TRUE</option></select></div>
-      </section>
-      <section class="aim-section">
-        <h3 class="aim-section-head"><span>Crosshair</span><div id="aim-crosshair-toggle" class="aim-switch on" role="switch" aria-checked="true"></div></h3>
-        <div class="aim-row"><span>Style</span><select id="aim-crosshair-style"><option>Cross</option><option>Dot</option><option>Circle</option></select></div>
-        <div class="aim-row"><span>Size</span><input id="aim-crosshair-size" type="number" step="1" min="1" max="10"></div>
-        <div class="aim-row"><span>Opacity (Changes applied on next start)</span><input id="aim-crosshair-opacity" type="number" step="1" min="0" max="100"></div>
-        <div class="aim-row"><span>Color</span><div class="color-wrap"><input id="aim-crosshair-color-picker" class="color-swatch" type="color" value="#aa0000"><input id="aim-crosshair-color" type="text" value="#AA0000"></div></div>
-      </section>
-      <section class="aim-section">
-        <h3 class="aim-section-head"><span>Fire with left click</span><div id="aim-fire-toggle" class="aim-switch on" role="switch" aria-checked="true"></div></h3>
-        <div class="aim-instruction">?? Place the fire icon in the fire weapon control on the screen</div>
-        <button id="aim-place-fire" class="aim-place-btn" type="button">Place fire position</button>
-        <div class="aim-row"><span>Action position X</span><input id="aim-fire-x" type="number" step="0.01" min="0" max="100"></div>
-        <div class="aim-row"><span>Action position Y</span><input id="aim-fire-y" type="number" step="0.01" min="0" max="100"></div>
-        <div class="aim-row"><span>Action</span><select id="aim-fire-action"><option>LEFT CLICK</option><option>RIGHT CLICK</option><option>MIDDLE CLICK</option></select></div>
-      </section>
-      <section class="aim-section">
-        <h3 class="aim-section-head"><span>Look around mode</span><div id="aim-look-toggle" class="aim-switch" role="switch" aria-checked="false"></div></h3>
-        <div class="aim-instruction">?? Place the eye icon on the look around control if available</div>
-        <button id="aim-place-look" class="aim-place-btn" type="button">Place free look position</button>
-        <div class="aim-row"><span>Free look position X</span><input id="aim-look-x" type="number" step="0.01" min="-1" max="100"></div>
-        <div class="aim-row"><span>Free look position Y</span><input id="aim-look-y" type="number" step="0.01" min="-1" max="100"></div>
-      </section>
-      <div class="aim-footer"><span>? Changes will be saved automatically</span><button id="aim-delete" class="aim-trash" type="button" title="Delete Aim control">??</button></div>
-      <div id="aim-panel-status" class="inspector-status" style="margin-top:8px;"></div>
-    </div>
-    <div class="aim-body" id="aim-body-gamepad" style="display:none;"><p style="color:#ccc;margin:8px 0;">Gamepad settings are not supported yet</p></div>
-  </div>
-</div>
 
 <script>
 (function () {
@@ -406,16 +335,53 @@ export function renderPage(options) {
       }, timeoutMs);
     }
   }
+  function uiSyncMode() {
+    try {
+      var playing = !!mappingActive;
+      var body = document.body || document.getElementById('app-body');
+      if (body) { body.classList.toggle('mode-play', playing); body.classList.toggle('mode-setup', !playing); }
+      var badge = document.getElementById('mode-badge');
+      if (badge) { badge.textContent = playing ? 'PLAYING' : 'SETUP'; badge.className = 'mode-badge' + (playing ? ' playing' : ''); }
+      var btn = document.getElementById('mapping-start');
+      if (btn) {
+        btn.textContent = playing ? '■ Stop playing' : '▶ Start playing';
+        btn.className = 'btn ' + (playing ? 'danger' : 'primary') + ' play-btn';
+      }
+      var placed = Array.isArray(importedHudTargets) ? importedHudTargets.length : 0;
+      var bound = Array.isArray(importedHudTargets) ? importedHudTargets.filter(function(t){ return t && t.key && !/^km:/.test(t.key); }).length : 0;
+      var bs = document.getElementById('bottom-status');
+      if (bs) bs.textContent = playing ? 'Playing — press Esc to stop' : ('Ready — ' + placed + ' controls placed, ' + bound + ' keys set');
+      var fn = document.getElementById('f-note');
+      if (fn) fn.textContent = playing ? 'Playing: keys send taps, mouse aims. Press Esc to stop.' : 'Setup: place controls, then start playing.';
+      var ph = document.getElementById('play-hint');
+      if (ph) ph.textContent = (playing && document.pointerLockElement === stage)
+        ? 'Mouse captured: move to aim, left click fires at your Fire point. Press Esc to stop.'
+        : (playing ? 'Playing: press your keys to use controls. Click the screen to capture the mouse for aiming.' : 'Left click fires at your Fire point when aiming. Click taps where you click when mapping is off.');
+      var pks = document.getElementById('play-keys-summary');
+      if (pks) {
+        var keys = (importedHudTargets||[]).filter(function(t){return t&&t.key&&!/^km:/.test(t.key);}).map(function(t){return (t.actionLabel||kmTypeLabel(t.action||t.kmType||'tap'))+': '+displayKey(t.key);});
+        pks.innerHTML = keys.length ? keys.map(function(k){ return '<span class="keycap" style="margin:2px 4px 2px 0;display:inline-grid;">'+escapeClient(k)+'</span>'; }).join(' ') : 'No keys set yet.';
+      }
+      var sp = document.getElementById('step-place'); if (sp) sp.classList.toggle('done', placed>0);
+      var sk = document.getElementById('step-play'); if (sk) sk.classList.toggle('done', playing);
+      var sc = document.getElementById('step-connect');
+      if (sc) { try { sc.classList.toggle('done', (document.getElementById('conn-dot')||{}).className.indexOf('ok')!==-1); } catch(e){} }
+      var sensLabel = document.getElementById('km-mouse-sensitivity');
+      if (sensLabel) {
+        var rv = Number((document.getElementById('km-mouse-range')||{}).value);
+        if (!Number.isFinite(rv)) rv = 1.44;
+        sensLabel.textContent = rv < 0.8 ? 'Slow' : (rv <= 2.2 ? 'Normal' : 'Fast');
+      }
+    } catch (e) {}
+  }
   function updateMappingStatusUi() {
     var st = document.getElementById('mapping-status');
-    var btn = document.getElementById('mapping-start');
+    var btnOld = document.getElementById('mapping-start');
     if (st) {
-      st.textContent = mappingActive ? 'Mapping ON — keys and mouse are live' : 'Mapping OFF — press Start mapping to play';
+      st.textContent = mappingActive ? 'Mapping ON — keys and mouse are live' : 'Mapping OFF — press Start playing to play';
       st.className = 'pill ' + (mappingActive ? 'ok' : 'bad');
-      st.style.fontSize = '11px';
-      st.style.padding = '4px 8px';
     }
-    if (btn) btn.textContent = mappingActive ? 'Stop mapping' : 'Start mapping';
+    uiSyncMode();
   }
   function scheduleMappingUpdate(reason) {
     if (!mappingActive) return;
@@ -579,7 +545,7 @@ export function renderPage(options) {
     videoCanvas.width = width;
     videoCanvas.height = height;
     fitStage();
-    document.getElementById('device-pill').textContent = '${escapeHtml(model || 'unknown')} � ' + W + '�' + H;
+    document.getElementById('device-pill').textContent = '${escapeHtml(model || 'unknown')} ï¿½ ' + W + 'ï¿½' + H;
     updateProfileOrientation();
   }
 
@@ -614,10 +580,9 @@ export function renderPage(options) {
   }
 
   function kmTypeLabel(type) {
-    var labels = { tap: 'Tap', repeat: 'Repeat', dpad: 'D-pad', aim: 'Aim', freelook: 'Free look', script: 'Script', swipe: 'Swipe', zoom: 'Zoom', tilt: 'Tilt', mobadpad: 'MOBA D-pad', mobaskill: 'MOBA Skill', rotate: 'Rotate', edgescroll: 'Edge scroll', scroll: 'Scroll', mousewheel: 'Mouse wheel' };
+    var labels = { tap: 'Tap spot', repeat: 'Repeated tap', dpad: 'D-pad', aim: 'Aim, pan and shoot', freelook: 'Free look', script: 'Script', swipe: 'Swipe', zoom: 'Zoom', tilt: 'Tilt', mobadpad: 'MOBA D-pad', mobaskill: 'MOBA skill pad', rotate: 'Rotate', edgescroll: 'Edge scroll', scroll: 'Scroll', mousewheel: 'Mouse wheel' };
     return labels[type] || type || 'Control';
   }
-
   function renderHudTargets() {
     stage.querySelectorAll('.hud-target').forEach(function (node) { node.remove(); });
     importedHudTargets.forEach(function (target, index) {
@@ -628,10 +593,10 @@ export function renderPage(options) {
       node.style.left = ((target.x || 0) * 100) + '%';
       node.style.top = ((target.y || 0) * 100) + '%';
       var isPlaceholder = !target.key || /^km:/.test(target.key);
-      var keyLabel = isPlaceholder ? 'Press a key�' : displayKey(target.key);
+      var keyLabel = isPlaceholder ? 'Set key' : displayKey(target.key);
       var actionLabel = target.actionLabel || kmTypeLabel(target.action || target.kmType || 'tap');
-      node.innerHTML = '<i></i><b>' + escapeClient(actionLabel) + '</b><b>' + escapeClient(keyLabel) + '</b>';
-      node.title = actionLabel + (isPlaceholder ? ' (press a key to assign)' : ' [' + keyLabel + ']') + ' � drag to move';
+      node.innerHTML = '<div class="cap">' + escapeClient(keyLabel) + '</div><div class="lbl">' + escapeClient(actionLabel) + '</div><i></i><b>' + escapeClient(actionLabel) + '</b><b>' + escapeClient(keyLabel) + '</b>';
+      node.title = actionLabel + (isPlaceholder ? ' — click and press a key to assign' : ' (' + keyLabel + ') — drag to move, click to select');
       node.addEventListener('click', function (evt) {
         evt.preventDefault();
         evt.stopPropagation();
@@ -654,15 +619,15 @@ export function renderPage(options) {
     if (keyCountEl) keyCountEl.textContent = String(boundCount);
     var info = document.getElementById('km-selected-info');
     if (info) {
-      if (placingNewControl) info.textContent = 'Click screen to place control�';
-      else if (aimPlacementMode === 'fire') info.textContent = 'Click screen to place fire position…';
-      else if (aimPlacementMode === 'look') info.textContent = 'Click screen to place free look position…';
-      else if (aimPlacementMode === 'aim-anchor-mouse') info.textContent = 'Click screen to place Aim anchor…';
-      else if (aimPlacementMode === 'scope-mouse') info.textContent = 'Click screen to place Scope position…';
+      if (placingNewControl) info.textContent = 'Click the phone screen to place controlï¿½';
+      else if (aimPlacementMode === 'fire') info.textContent = 'Click the phone screen to place fire positionâ€¦';
+      else if (aimPlacementMode === 'look') info.textContent = 'Click the phone screen to place free look positionâ€¦';
+      else if (aimPlacementMode === 'aim-anchor-mouse') info.textContent = 'Click the phone screen to place Aim anchorâ€¦';
+      else if (aimPlacementMode === 'scope-mouse') info.textContent = 'Click the phone screen to place Scope positionâ€¦';
       else if (selectedHudTarget >= 0 && importedHudTargets[selectedHudTarget]) {
         var t = importedHudTargets[selectedHudTarget];
         var k = t.key && !/^km:/.test(t.key) ? displayKey(t.key) : 'unassigned';
-        info.textContent = (t.actionLabel || kmTypeLabel(t.action)) + ' � key: ' + k + ' (click Key/press a key to set, drag to move)';
+        info.textContent = (t.actionLabel || kmTypeLabel(t.action)) + ' ï¿½ key: ' + k + ' (click Key/press a key to set, drag to move)';
       } else info.textContent = importedHudTargets.length ? 'Select a control to assign key/move/delete' : 'Click or drag a control to place it';
     }
     var del = document.getElementById('layout-delete');
@@ -820,12 +785,12 @@ export function renderPage(options) {
     var keyEl = document.getElementById('inspector-key');
     var hintEl = document.getElementById('inspector-key-hint');
     var aimBtn = document.getElementById('inspector-aim-settings');
-    if (typeEl) typeEl.textContent = t ? (t.actionLabel || kmTypeLabel(t.action || t.kmType)) : '�';
+    if (typeEl) typeEl.textContent = t ? (t.actionLabel || kmTypeLabel(t.action || t.kmType)) : 'ï¿½';
     if (aimBtn) aimBtn.style.display = (t && (t.action === 'aim' || t.kmType === 'aim')) ? '' : 'none';
     if (!keyEl) return;
     keyEl.classList.toggle('capturing', !!inspectorKeyCapture);
     if (inspectorKeyCapture && t) {
-      keyEl.value = 'Press a key�';
+      keyEl.value = 'Press a keyï¿½';
       if (hintEl) hintEl.textContent = '(Backspace clears, Esc cancels)';
     } else if (t) {
       var hasKey = t.key && !/^km:/.test(t.key);
@@ -903,7 +868,7 @@ export function renderPage(options) {
     renderHudTargets();
     saveImportedBindings();
     setInspectorStatus('');
-    setLayoutStatus('Placed ' + kmTypeLabel(type) + ' � click Key or press a key to assign it.');
+    setLayoutStatus('Placed ' + kmTypeLabel(type) + ' ï¿½ click Key or press a key to assign it.');
     renderAddControlInspector();
     if (!mappingActive) { inspectorOldKey = t.key; inspectorKeyCapture = true; renderAddControlInspector(); try { document.getElementById('inspector-key').focus(); } catch (e) {} }
     updateAimCrosshair();
@@ -995,8 +960,48 @@ export function renderPage(options) {
     syncMouseSettingsUi();
   }
 
+
+  function pct2(v, max) {
+    var n = (Number(v) / Math.max(1, Number(max) || 1)) * 100;
+    if (!Number.isFinite(n)) n = 0;
+    return n.toFixed(2);
+  }
+  function showTapRipple(point) {
+    try {
+      var devW = point.devW || W, devH = point.devH || H;
+      var r = document.createElement('div');
+      r.className = 'tap-ripple';
+      r.style.left = (point.x / Math.max(1, devW) * 100) + '%';
+      r.style.top = (point.y / Math.max(1, devH) * 100) + '%';
+      stage.appendChild(r);
+      setTimeout(function () { try { r.remove(); } catch (e) {} }, 480);
+    } catch (e) {}
+  }
+  function setTapStatus(text, isError) {
+    try {
+      var ids = ['tap-status', 'layout-status', 'mapping-hint', 'mouse-settings-status'];
+      for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (!el) continue;
+        el.textContent = text || '';
+        if (isError) {
+          if (el.className && el.className.indexOf('inspector-status') !== -1) el.className = 'inspector-status error';
+          else el.style.color = '#f97066';
+        } else {
+          if (el.className && el.className.indexOf('inspector-status') !== -1 && ids[i] !== 'mapping-hint') el.className = 'inspector-status';
+          else el.style.color = '';
+        }
+      }
+      var bb = document.getElementById('bottom-status');
+      if (bb && text) bb.textContent = text;
+      try { console.log('[tap-status]', isError ? 'ERR' : 'OK', text); } catch (e) {}
+    } catch (e) {}
+  }
+  function stopDrag() { try { stopTapDrag(); } catch (e) { dragging = false; tapDrag = null; pendingMove = null; } }
+
   // Single stage pointer handler: (a) place armed control, (b) marker edit in layout mode, (c) layout miss deselect, (d) tap
   var tapDrag = null; // { pointerId, downPoint, moved }
+  var lastTapInfo = null;
   stage.addEventListener('pointerdown', function (evt) {
     try {
       // (a) armed placement
@@ -1006,12 +1011,12 @@ export function renderPage(options) {
         var pType = pendingControlType || 'tap';
         var position = toDevice(evt);
         placeControlAt(position.x / Math.max(1, W), position.y / Math.max(1, H), pType);
-        try { setTapStatus('Placed ' + kmTypeLabel(pType) + ' — press a key to assign it. No tap sent.'); } catch (e) {}
+        try { setTapStatus('Placed ' + kmTypeLabel(pType) + ' â€” press a key to assign it. No tap sent.'); } catch (e) {}
         return;
       }
-      // (b) marker select/move only in Edit layout mode
+      // (b) marker select/move in setup mode (drag to reposition, click to select for key assign)
       var targetNode = evt.target.closest && evt.target.closest('.hud-target');
-      if (targetNode && layoutEditMode) {
+      if (targetNode && !mappingActive) {
         evt.preventDefault();
         evt.stopImmediatePropagation();
         selectedHudTarget = Number(targetNode.dataset.targetIndex);
@@ -1019,16 +1024,17 @@ export function renderPage(options) {
         movingHudTarget = { pointerId: evt.pointerId, index: selectedHudTarget, startX: startPoint.x, startY: startPoint.y, moved: false };
         try { stage.setPointerCapture(evt.pointerId); } catch (e) {}
         renderHudTargets();
-        try { setLayoutStatus('Selected ' + ((importedHudTargets[selectedHudTarget] || {}).actionLabel || 'control') + ' — drag to move or press a key to assign.'); } catch (e) {}
+        try { setLayoutStatus('Selected ' + ((importedHudTargets[selectedHudTarget] || {}).actionLabel || 'control') + ' — press a key to assign it, or drag to move.'); } catch (e) {}
+        try { setTapStatus('Control selected. Press a key to assign it, or drag to move it.', false); } catch(e){}
         return;
       }
-      // (c) edit mode miss: deselect and fall through to tap (do not swallow)
-      if (layoutEditMode && !targetNode) {
+      // (c) setup/edit miss: deselect and fall through to tap (do not swallow)
+      if ((layoutEditMode || !mappingActive) && !targetNode && selectedHudTarget !== -1 && !placingNewControl) {
         if (selectedHudTarget !== -1) {
           selectedHudTarget = -1;
           try { renderHudTargets(); } catch (e) {}
         }
-        try { setLayoutStatus('Edit layout: no marker selected — sending tap.'); } catch (e) {}
+        try { setLayoutStatus('Edit layout: no marker selected â€” sending tap.'); } catch (e) {}
         // fall through to (d)
       }
 
@@ -1063,13 +1069,13 @@ export function renderPage(options) {
       try { stage.setPointerCapture(evt.pointerId); } catch (e) {}
       lastTapInfo = { x: point.x, y: point.y, px: pct2(point.x, point.devW || W), py: pct2(point.y, point.devH || H) };
       showTapRipple(point);
-      setTapStatus('Tapping at ' + lastTapInfo.px + '%, ' + lastTapInfo.py + '% (device ' + point.x + ',' + point.y + ')…');
+      setTapStatus('Tapping at ' + lastTapInfo.px + '%, ' + lastTapInfo.py + '% (device ' + point.x + ',' + point.y + ')â€¦');
       try { console.log('[tap] down request', { op: 'down', name: 'A', x: point.x, y: point.y }); } catch (e) {}
       api('/api/input', { op: 'down', name: 'A', x: point.x, y: point.y })
         .then(function (res) {
           try {
             var msgCount = res && (res.totalMessages != null ? res.totalMessages : (res.pointers && res.pointers.totalMessages != null ? res.pointers.totalMessages : null));
-            var suffix = (msgCount != null ? (' — messages sent: ' + msgCount) : '');
+            var suffix = (msgCount != null ? (' â€” messages sent: ' + msgCount) : '');
             setTapStatus('Tapped at ' + lastTapInfo.px + '%, ' + lastTapInfo.py + '%' + suffix);
           } catch (e) {}
           try { console.log('[tap] down ok', res); } catch (e) {}
@@ -1458,9 +1464,9 @@ export function renderPage(options) {
         renderHudTargets();
       });
     }
-    wirePlace('mouse-place-aim', 'aim-anchor-mouse', 'Click screen to place Aim anchor…');
-    wirePlace('mouse-place-fire', 'fire', 'Click screen to place Fire position…');
-    wirePlace('mouse-place-scope', 'scope-mouse', 'Click screen to place Scope position…');
+    wirePlace('mouse-place-aim', 'aim-anchor-mouse', 'Click the phone screen to place Aim anchorâ€¦');
+    wirePlace('mouse-place-fire', 'fire', 'Click the phone screen to place Fire positionâ€¦');
+    wirePlace('mouse-place-scope', 'scope-mouse', 'Click the phone screen to place Scope positionâ€¦');
   })();
   // Inspector key field: click to (re)bind
   var inspectorKeyEl = document.getElementById('inspector-key');
@@ -1500,7 +1506,7 @@ export function renderPage(options) {
         var t = aimTarget(); if (!t) return;
         if (mappingActive) { var st=document.getElementById('aim-panel-status'); if(st){st.textContent='Stop mapping before editing.'; st.className='inspector-status error';} return; }
         aimPanelCapture = { field: field, oldKey: t[field] };
-        this.value = 'Press a key�'; this.classList.add('capturing');
+        this.value = 'Press a keyï¿½'; this.classList.add('capturing');
         var st2=document.getElementById('aim-panel-status'); if(st2){st2.textContent='Press a key to bind (Backspace clears, Esc cancels)'; st2.className='inspector-status';}
       });
     }
@@ -1547,9 +1553,9 @@ export function renderPage(options) {
     bindColor();
 
     var placeFire = document.getElementById('aim-place-fire');
-    if (placeFire) placeFire.addEventListener('click', function(){ if(aimModalOpenIndex<0) return; if(mappingActive){ var st=document.getElementById('aim-panel-status'); if(st){st.textContent='Stop mapping before placing.'; st.className='inspector-status error';} return; } aimPlacementMode='fire'; this.classList.add('armed'); var ol=document.getElementById('aim-place-look'); if(ol) ol.classList.remove('armed'); setLayoutStatus('Click screen to place fire position�'); renderHudTargets(); });
+    if (placeFire) placeFire.addEventListener('click', function(){ if(aimModalOpenIndex<0) return; if(mappingActive){ var st=document.getElementById('aim-panel-status'); if(st){st.textContent='Stop mapping before placing.'; st.className='inspector-status error';} return; } aimPlacementMode='fire'; this.classList.add('armed'); var ol=document.getElementById('aim-place-look'); if(ol) ol.classList.remove('armed'); setLayoutStatus('Click the phone screen to place fire positionï¿½'); renderHudTargets(); });
     var placeLook = document.getElementById('aim-place-look');
-    if (placeLook) placeLook.addEventListener('click', function(){ if(aimModalOpenIndex<0) return; if(mappingActive){ var st=document.getElementById('aim-panel-status'); if(st){st.textContent='Stop mapping before placing.'; st.className='inspector-status error';} return; } aimPlacementMode='look'; this.classList.add('armed'); var of=document.getElementById('aim-place-fire'); if(of) of.classList.remove('armed'); setLayoutStatus('Click screen to place free look position�'); renderHudTargets(); });
+    if (placeLook) placeLook.addEventListener('click', function(){ if(aimModalOpenIndex<0) return; if(mappingActive){ var st=document.getElementById('aim-panel-status'); if(st){st.textContent='Stop mapping before placing.'; st.className='inspector-status error';} return; } aimPlacementMode='look'; this.classList.add('armed'); var of=document.getElementById('aim-place-fire'); if(of) of.classList.remove('armed'); setLayoutStatus('Click the phone screen to place free look positionï¿½'); renderHudTargets(); });
 
     var delAim = document.getElementById('aim-delete');
     if (delAim) delAim.addEventListener('click', function(){
@@ -1597,7 +1603,7 @@ export function renderPage(options) {
     ghost.style.top = evt.clientY + 'px';
     document.querySelectorAll('.km-tile.placing').forEach(function (n) { n.classList.remove('placing'); });
     if (evt.currentTarget && evt.currentTarget.classList) evt.currentTarget.classList.add('placing');
-    setLayoutStatus('Drag to screen and release to place ' + kmTypeLabel(tileDrag.type) + '�');
+    setLayoutStatus('Drag to screen and release to place ' + kmTypeLabel(tileDrag.type) + 'ï¿½');
   }
   function updateTileDrag(evt) {
     if (!tileDrag || evt.pointerId !== tileDrag.pointerId) return;
@@ -1618,7 +1624,7 @@ export function renderPage(options) {
       placingNewControl = true;
       pendingControlType = type;
       renderHudTargets();
-      setLayoutStatus('Click screen to place ' + kmTypeLabel(type) + '�');
+      setLayoutStatus('Click the phone screen to place ' + kmTypeLabel(type) + 'ï¿½');
       return;
     }
     var rect = stage.getBoundingClientRect();
@@ -1688,8 +1694,8 @@ export function renderPage(options) {
     if (layoutEditMode) {
       selectedHudTarget = selectedHudTarget >= 0 ? selectedHudTarget : -1;
       setLayoutStatus(importedHudTargets.length
-        ? 'Edit mode on � drag a marker to move it.'
-        : 'Edit mode on � click a tile, then click the screen to place your first control.');
+        ? 'Edit mode on ï¿½ drag a marker to move it.'
+        : 'Edit mode on ï¿½ click a tile, then click the screen to place your first control.');
     } else {
       placingNewControl = false;
       pendingControlType = null;
@@ -1720,12 +1726,12 @@ export function renderPage(options) {
       layoutEditMode = false;
       placingNewControl = false;
       renderHudTargets();
-      setMappingHint('Requesting mouse capture… click the phone screen if prompted.', false);
+      setMappingHint('Requesting mouse captureâ€¦ click the phone screen if prompted.', false);
       try {
         var lockRequest = stage.requestPointerLock();
         Promise.resolve(lockRequest).then(function () {
           if (document.pointerLockElement !== stage) {
-            throw new Error('Mouse capture was not granted — click on the phone screen first, then click Start mapping again.');
+            throw new Error('Mouse capture was not granted â€” click on the phone screen first, then click Start mapping again.');
           }
           var settings = mapSettings();
           try {
@@ -1738,12 +1744,12 @@ export function renderPage(options) {
         }).then(function (res) {
           if (document.pointerLockElement !== stage) {
             return queuedApi({ op: 'mapping-stop' }).catch(function () {}).then(function () {
-              throw new Error('Mouse capture ended during startup — click the phone screen, then click Start mapping again.');
+              throw new Error('Mouse capture ended during startup â€” click the phone screen, then click Start mapping again.');
             });
           }
           mappingActive = true;
           renderHudTargets();
-          setMappingHint('Mapping active. Press Esc to stop.', false);
+          setMappingHint('', false); try { setTapStatus('Playing — press Esc to stop.', false); } catch(e){} try { uiSyncMode(); } catch(e){}
           if (res && res.missingKeys && res.missingKeys.length) {
             var msg = 'Missing keys on server: ' + res.missingKeys.join(', ');
             setMappingHint(msg, true);
@@ -1755,7 +1761,7 @@ export function renderPage(options) {
           renderHudTargets();
           var msg = error && error.message ? error.message : String(error);
           if (/Mouse capture was not granted/i.test(msg) || /not granted/i.test(msg)) {
-            msg = 'Mouse capture was not granted — click on the phone screen first, then click Start mapping again.';
+            msg = 'Mouse capture was not granted â€” click on the phone screen first, then click Start mapping again.';
           }
           setMappingHint(msg, true);
           report(new Error(msg));
@@ -1776,7 +1782,8 @@ export function renderPage(options) {
     if (document.pointerLockElement === stage) { try { document.exitPointerLock(); } catch (e) {} }
     queuedApi({ op: 'mapping-stop' }).catch(report);
     renderHudTargets();
-    if (!silent) setMappingHint('Mapping OFF.', false);
+    if (!silent) { try { setTapStatus('Stopped playing — back to setup.', false); } catch(e){} setMappingHint('', false); }
+    try { uiSyncMode(); } catch(e){}
   }
 
   function panic() {
@@ -1784,7 +1791,9 @@ export function renderPage(options) {
     if (document.pointerLockElement === stage) { try { document.exitPointerLock(); } catch (e) {} }
     queuedApi({ op: 'panic' }).catch(report);
     renderHudTargets();
-    setMappingHint('Mapping OFF (panic).', false);
+    try { setTapStatus('Stopped — all controls released.', false); } catch(e){}
+    setMappingHint('', false);
+    try { uiSyncMode(); } catch(e){}
   }
 
   document.addEventListener('pointerlockchange', function () {
@@ -1792,7 +1801,7 @@ export function renderPage(options) {
       mappingActive = false;
       queuedApi({ op: 'mapping-stop' }).catch(report);
       renderHudTargets();
-      setMappingHint('Mouse capture ended — mapping stopped. Click the phone screen, then Start mapping again.', true);
+      setMappingHint('Mouse capture ended â€” mapping stopped. Click the phone screen, then Start mapping again.', true);
     }
   });
   window.addEventListener('keydown', function (evt) {
@@ -1951,18 +1960,47 @@ export function renderPage(options) {
 
     if (!key || key === 'escape') return;
 
-    // Quick-assign when control selected (not in capture mode, not typing in input)
-    if (selectedHudTarget >= 0 && importedHudTargets[selectedHudTarget] && !mappingActive) {
-      var tag = (evt.target && evt.target.tagName) ? evt.target.tagName.toLowerCase() : '';
-      var isTextField = (tag === 'input' || tag === 'textarea' || tag === 'select');
-      if (!isTextField) {
-        // don't steal if aim modal open and focus inside it except allow? better ignore when modal open without capture
-        if (aimModalOpenIndex >= 0) { /* modal fields handle themselves */ }
-        else {
-          // allow quick assign only when explicitly editing (Edit mode on) to avoid accidental rebinds
-          // but keep previous behavior of allowing when selected and not mapping: user asked for editable via Key field click.
-          // Do nothing here; require Key field click for intentional capture.
+    // Delete selected control in setup (not while capturing/mapping/typing)
+    if ((key === 'delete' || key === 'backspace') && !mappingActive && !inspectorKeyCapture && !isAimPanelCapture && selectedHudTarget >= 0 && importedHudTargets[selectedHudTarget]) {
+      var tagd = (evt.target && evt.target.tagName) ? evt.target.tagName.toLowerCase() : '';
+      var typingd = (tagd === 'input' || tagd === 'textarea' || tagd === 'select' || (evt.target && evt.target.isContentEditable));
+      if (!typingd) {
+        evt.preventDefault();
+        try { document.getElementById('layout-delete') && document.getElementById('layout-delete').click(); } catch (e) {}
+        return;
+      }
+    }
+
+    // Quick-assign: in setup, select a control then press a key to assign it
+    if (!mappingActive && !inspectorKeyCapture && !isAimPanelCapture && aimModalOpenIndex < 0 && selectedHudTarget >= 0 && importedHudTargets[selectedHudTarget]) {
+      var tagq = (evt.target && evt.target.tagName) ? evt.target.tagName.toLowerCase() : '';
+      var typingq = (tagq === 'input' || tagq === 'textarea' || tagq === 'select' || (evt.target && evt.target.isContentEditable));
+      if (!typingq && key && key !== 'escape' && key !== 'delete' && key !== 'backspace') {
+        var tgtq = importedHudTargets[selectedHudTarget];
+        // prevent duplicates
+        var dupq = -1;
+        for (var qi = 0; qi < importedHudTargets.length; qi++) {
+          if (qi === selectedHudTarget) continue;
+          var oq = importedHudTargets[qi]; if (!oq) continue;
+          if (oq.key === key) { dupq = qi; break; }
+          if ((oq.action === 'aim' || oq.kmType === 'aim') && (oq.startStopKey === key || oq.suspendKey === key)) { dupq = qi; break; }
         }
+        if (dupq >= 0) {
+          evt.preventDefault();
+          setInspectorStatus(displayKey(key) + ' is already used by ' + (importedHudTargets[dupq].actionLabel || kmTypeLabel(importedHudTargets[dupq].action)) + '.', true);
+          setTapStatus(displayKey(key) + ' is already used by another control.', true);
+          return;
+        }
+        evt.preventDefault();
+        tgtq.key = key;
+        syncTapBindingsFromTargets();
+        renderHudTargets();
+        saveImportedBindings();
+        setInspectorStatus((tgtq.actionLabel || kmTypeLabel(tgtq.action)) + ' is now ' + displayKey(key) + '.', false);
+        setTapStatus((tgtq.actionLabel || kmTypeLabel(tgtq.action)) + ' is now ' + displayKey(key) + '. Click Start playing to test it.', false);
+        try { renderAddControlInspector(); } catch(e){}
+        try { uiSyncMode(); } catch(e){}
+        return;
       }
     }
 
@@ -1972,7 +2010,7 @@ export function renderPage(options) {
       var tag = (evt.target && evt.target.tagName) ? evt.target.tagName.toLowerCase() : '';
       var typing = (tag === 'input' || tag === 'textarea' || tag === 'select' || (evt.target && evt.target.isContentEditable));
       if (!typing && isMappedKey) {
-        setMappingHint('Mapping is off — click Start mapping first', true, 3000);
+        setMappingHint('Mapping is off â€” click Start mapping first', true, 3000);
       }
       return;
     }
@@ -2091,39 +2129,54 @@ export function renderPage(options) {
           if (dw > 0 && dh > 0 && (dw !== W || dh !== H)) setDisplaySize(dw, dh);
         } catch (e) {}
         var pill = document.getElementById('session-pill');
-        var mockLabel = state.mock ? ' (mock)' : '';
-        if (state.session && state.session.running) {
-          pill.textContent = 'session up' + mockLabel;
-          pill.className = 'pill ok';
-        } else {
-          pill.textContent = 'session down' + mockLabel;
-          pill.className = 'pill bad';
+        var running = !!(state.session && state.session.running);
+        if (pill) {
+          pill.textContent = running ? (state.mock ? 'Running (demo)' : 'Connected') : 'Not connected';
+          pill.className = 'pill ' + (running ? 'ok' : 'bad');
         }
+        try {
+          var dot = document.getElementById('conn-dot');
+          var ct = document.getElementById('conn-text');
+          if (state.mock) {
+            if (dot) dot.className = 'dot';
+            if (ct) ct.textContent = 'Demo mode — no phone attached';
+          } else if (running) {
+            if (dot) dot.className = 'dot ok';
+            var modelName = (state.device && (state.device.model || state.device.serial)) || 'Phone';
+            if (ct) ct.textContent = 'Phone connected — ' + modelName;
+          } else {
+            if (dot) dot.className = 'dot';
+            if (ct) ct.textContent = 'No phone connected';
+          }
+          var cc = document.getElementById('conn-controls');
+          if (cc) cc.textContent = mappingActive ? 'Playing' : 'Ready';
+        } catch (e) {}
         screenWakeState = state.screenWake || screenWakeState || null;
         screenLocked = Boolean((screenWakeState && screenWakeState.locked) || (state.device && state.device.locked));
         if (screenLocked) {
           screenMessage.textContent = 'Unlock your phone to show the live screen.';
           screenMessage.style.display = 'flex';
         } else if (INITIAL_SCREEN_LOCKED && !videoConnected && !currentScreenUrl) {
-          screenMessage.textContent = ${JSON.stringify(screenAvailable ? 'Waiting for the phone screen�' : 'Phone screen preview is unavailable.')};
+          screenMessage.textContent = ${JSON.stringify(screenAvailable ? 'Waiting for the phone screenï¿½' : 'Phone screen preview is unavailable.')};
         }
         placeMarkers((state.pointers && state.pointers.active) || []);
         document.getElementById('k-count').textContent = (state.pointers && state.pointers.count) || 0;
         document.getElementById('k-messages').textContent = (state.pointers && state.pointers.totalMessages) || 0;
         document.getElementById('k-panics').textContent = (state.pointers && state.pointers.panics) || 0;
-        document.getElementById('k-hz').textContent = state.lastSweep ? state.lastSweep.achievedHz : '�';
+        document.getElementById('k-hz').textContent = state.lastSweep ? state.lastSweep.achievedHz : 'ï¿½';
         document.getElementById('k-proof').textContent = state.lastProof
-          ? (state.lastProof.ok ? 'ok' : 'failed') + ' � ' + state.lastProof.totalMs + ' ms'
-          : '�';
+          ? (state.lastProof.ok ? 'ok' : 'failed') + ' ï¿½ ' + state.lastProof.totalMs + ' ms'
+          : 'ï¿½';
         var video = state.video || {};
         document.getElementById('k-video-connected').textContent = video.videoConnected ? 'yes' : 'no';
         document.getElementById('k-video-frames').textContent = video.videoFramesReceived ?? 0;
         document.getElementById('k-video-keyframe').textContent = video.keyframeReceived ? 'yes' : 'no';
-        document.getElementById('k-video-codec').textContent = video.codecConfigured ? 'h264' : '�';
-        document.getElementById('k-video-error').textContent = video.lastVideoError || '�';
-        var serverErr = video.lastServerError || state.lastServerError || (state.session && state.session.lastServerError) || '�';
+        document.getElementById('k-video-codec').textContent = video.codecConfigured ? 'h264' : 'ï¿½';
+        document.getElementById('k-video-error').textContent = video.lastVideoError || 'ï¿½';
+        var serverErr = video.lastServerError || state.lastServerError || (state.session && state.session.lastServerError) || 'ï¿½';
         var serverErrEl = document.getElementById('k-server-error');
         if (serverErrEl) serverErrEl.textContent = serverErr;
+        try { uiSyncMode(); } catch(e){}
         render(state.log || []);
       })
       .catch(function () {
@@ -2202,7 +2255,7 @@ export function renderPage(options) {
     videoFailed = true;
     stopVideoStream();
     if (reason) report(reason instanceof Error ? reason : new Error(String(reason)));
-    document.getElementById('video-status').textContent = 'Video failed � showing screenshot preview';
+    document.getElementById('video-status').textContent = 'Video failed ï¿½ showing screenshot preview';
     if (${screenAvailable ? 'true' : 'false'} && !screenshotPolling) pollScreen();
   }
 
@@ -2211,7 +2264,7 @@ export function renderPage(options) {
       throw new Error('This browser does not support low-latency H.264 video decoding');
     }
     if (screenLocked) {
-      document.getElementById('video-status').textContent = 'Unlock your phone';
+      document.getElementById('video-status').textContent = 'Unlock your phone to see the screen';
       screenMessage.textContent = 'Unlock your phone to show the live screen.';
       screenMessage.style.display = 'flex';
       if (${screenAvailable ? 'true' : 'false'} && !screenshotPolling) pollScreen();
@@ -2226,7 +2279,7 @@ export function renderPage(options) {
     decodedFrames = 0;
     lastVideoActivityAt = Date.now();
     videoStartAt = Date.now();
-    document.getElementById('video-status').textContent = 'Video starting � 90 fps target';
+    document.getElementById('video-status').textContent = 'Video starting ï¿½ 90 fps target';
     stopVideoStream();
     startWatchdog = setTimeout(function () {
       if (!firstFrameSeen) fallbackToScreenshots(new Error('Live video did not start within 3 seconds; using screenshot preview'));
@@ -2279,11 +2332,11 @@ export function renderPage(options) {
         var now = performance.now();
         if (now - fpsWindowStart >= 1000) {
           var fps = Math.round(renderedFrames * 1000 / (now - fpsWindowStart));
-          document.getElementById('video-status').textContent = 'Video live � ' + fps + ' fps � ' + decodedWidth + '�' + decodedHeight;
+          document.getElementById('video-status').textContent = 'Video live ï¿½ ' + fps + ' fps ï¿½ ' + decodedWidth + 'ï¿½' + decodedHeight;
           renderedFrames = 0;
           fpsWindowStart = now;
         } else if (decodedFrames === 1) {
-          document.getElementById('video-status').textContent = 'Video live � ' + decodedWidth + '�' + decodedHeight;
+          document.getElementById('video-status').textContent = 'Video live ï¿½ ' + decodedWidth + 'ï¿½' + decodedHeight;
         }
       }
       function resetDecoder() {
@@ -2395,6 +2448,121 @@ export function renderPage(options) {
     box.scrollTop = box.scrollHeight;
   }
 
+  (function(){
+    var gd = document.getElementById('guide-dismiss');
+    if (gd) gd.addEventListener('click', function(){ var g=document.getElementById('setup-guide'); if(g) g.style.display='none'; try{localStorage.setItem('heaven-guide-dismissed','1');}catch(e){} });
+    try { if(localStorage.getItem('heaven-guide-dismissed')==='1'){ var g=document.getElementById('setup-guide'); if(g) g.style.display='none'; } } catch(e){}
+    var hb = document.getElementById('help-btn');
+    if (hb) hb.addEventListener('click', function(){ var g=document.getElementById('setup-guide'); if(g){ g.style.display=''; } setTapStatus('Step 1: Connect phone. Step 2: Place controls. Step 3: Start playing.', false); });
+  })();
+
+  (function(){
+    var sb = document.getElementById('settings-backdrop');
+    function openSettings(){ if(sb){ sb.classList.add('open'); sb.setAttribute('aria-hidden','false'); } }
+    function closeSettings(){ if(sb){ sb.classList.remove('open'); sb.setAttribute('aria-hidden','true'); } }
+    var so=document.getElementById('settings-open'); if(so) so.addEventListener('click', openSettings);
+    var sc=document.getElementById('settings-close'); if(sc) sc.addEventListener('click', closeSettings);
+    if(sb) sb.addEventListener('click', function(e){ if(e.target===sb) closeSettings(); });
+    window.__openSettings=openSettings; window.__closeSettings=closeSettings;
+  })();
+
+  (function(){
+    function presetStatus(msg, err){ var el=document.getElementById('preset-status'); if(!el) return; el.textContent=msg||''; el.className='settings-status'+(err?' error':'')+(msg&&!err?' ok':''); }
+    function buildClientPreset(){
+      try { syncTapBindingsFromTargets(); } catch(e){}
+      var layout = { taps: importedTapBindings||[], targets: importedHudTargets||[], cameraToggleKey: profileCameraToggleKey||null, mouseSensitivity: Number((document.getElementById('km-mouse-range')||{}).value||1.44)||1.44 };
+      var profile = { scheme: 'My layout', taps: layout.taps, targets: layout.targets, controls: layout.targets, fields: {}, bindings: { WASD:{w:'w',a:'a',s:'s',d:'d'}, Fire:'left click', Scope:'right click' }, cameraToggleKey: layout.cameraToggleKey, controlsVersion:1 };
+      return { format:'heaven-preset', version:1, name: profile.scheme, exportedAt: new Date().toISOString(), 'heaven-msi-profile': profile, 'heaven-key-bindings': profile.bindings, 'heaven-layout': layout };
+    }
+    var ex=document.getElementById('preset-export-btn');
+    if(ex) ex.addEventListener('click', function(){
+      try {
+        var preset = buildClientPreset();
+        var blob = new Blob([JSON.stringify(preset,null,2)], {type:'application/json'});
+        var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='heaven-layout-'+new Date().toISOString().slice(0,10)+'.json'; document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href); a.remove();}catch(e){} }, 0);
+        presetStatus('Layout saved to file.', false);
+      } catch(e){ presetStatus('Could not save layout: '+(e&&e.message?e.message:e), true); }
+    });
+    var imp=document.getElementById('preset-import-btn'); var fin=document.getElementById('preset-file-input');
+    if(imp && fin) imp.addEventListener('click', function(){ fin.value=''; fin.click(); });
+    var pendingPreset=null;
+    if(fin) fin.addEventListener('change', function(){
+      var f=fin.files && fin.files[0]; if(!f) return;
+      var r=new FileReader();
+      r.onload=function(){
+        try {
+          var data=JSON.parse(String(r.result||''));
+          if(!data || data.format!=='heaven-preset' || data.version!==1 || !data['heaven-msi-profile'] || !Array.isArray((data['heaven-msi-profile']||{}).controls)) throw new Error('This file is not a valid layout.');
+          pendingPreset=data;
+          var conf=document.getElementById('preset-import-confirm'); var row=document.getElementById('preset-apply-row');
+          if(conf){ conf.style.display='block'; conf.textContent='Ready to load: '+(data.name||'Saved layout')+'. This will replace your current controls.'; }
+          if(row) row.style.display='flex';
+          presetStatus('Layout file looks good. Click Apply layout to use it.', false);
+        } catch(e){ pendingPreset=null; presetStatus('Could not load layout: '+(e&&e.message?e.message:'Invalid file'), true); var conf=document.getElementById('preset-import-confirm'); var row=document.getElementById('preset-apply-row'); if(conf) conf.style.display='none'; if(row) row.style.display='none'; }
+      };
+      r.readAsText(f);
+    });
+    var ap=document.getElementById('preset-apply-btn');
+    if(ap) ap.addEventListener('click', function(){
+      if(!pendingPreset){ presetStatus('Choose a layout file first.', true); return; }
+      try {
+        var p=pendingPreset['heaven-msi-profile']||{};
+        var layout=pendingPreset['heaven-layout']||{ taps:p.taps||[], targets:p.targets||p.controls||[], cameraToggleKey:p.cameraToggleKey||null, mouseSensitivity:1 };
+        importedTapBindings = Array.isArray(layout.taps)?layout.taps:(Array.isArray(p.taps)?p.taps:[]);
+        importedHudTargets = Array.isArray(layout.targets)?layout.targets:(Array.isArray(p.targets)?p.targets:(Array.isArray(p.controls)?p.controls:[]));
+        importedHudTargets.forEach(function(t,i){ if(!Number.isInteger(t.tapIndex)) t.tapIndex=i; if(!t.actionLabel) t.actionLabel=kmTypeLabel(t.action||t.kmType||'tap'); if(typeof normalizeAimTarget==='function') normalizeAimTarget(t); });
+        syncTapBindingsFromTargets();
+        profileCameraToggleKey = layout.cameraToggleKey || p.cameraToggleKey || null;
+        if(layout.mouseSensitivity){ var rr=document.getElementById('km-mouse-range'); if(rr) rr.value=layout.mouseSensitivity; }
+        saveImportedBindings(); renderHudTargets(); try{syncMouseSettingsUi();}catch(e){} try{uiSyncMode();}catch(e){}
+        pendingPreset=null; var conf=document.getElementById('preset-import-confirm'); var row=document.getElementById('preset-apply-row'); if(conf) conf.style.display='none'; if(row) row.style.display='none';
+        presetStatus('Layout loaded.', false); setTapStatus('Layout loaded.', false);
+      } catch(e){ presetStatus('Could not apply layout: '+(e&&e.message?e.message:e), true); }
+    });
+  })();
+
+  (function(){
+    function clamp01(v){ v=Number(v); if(!Number.isFinite(v)) v=0.5; return Math.max(0,Math.min(1,v)); }
+    function applyPreset(name){
+      if (mappingActive) { setTapStatus('Stop playing before applying a preset.', true); return; }
+      var targets = [];
+      function add(type,x,y,key,label){ targets.push({ key:key||'', x:clamp01(x), y:clamp01(y), action:type, kmType:type, actionLabel:label||kmTypeLabel(type), tapIndex:targets.length }); }
+      if (name==='shooter'){
+        add('dpad', 0.18, 0.72, 'w', 'D-pad'); // D-pad container position; keys handled by WASD defaults
+        var aim = defaultAimControl('aim', 0.84, 0.50, targets.length); aim.key=''; aim.actionLabel='Aim, pan and shoot'; targets.push(aim);
+        add('tap', 0.90, 0.78, 'r', 'Reload');
+        add('tap', 0.78, 0.86, 'c', 'Crouch');
+        add('tap', 0.70, 0.78, 'space', 'Jump');
+        add('tap', 0.62, 0.86, 'f', 'Interact');
+      } else if (name==='moba'){
+        add('mobadpad', 0.18, 0.72, 'w', 'MOBA D-pad');
+        add('mobaskill', 0.76, 0.70, 'q', 'Skill 1');
+        add('tap', 0.84, 0.62, 'e', 'Skill 2');
+        add('tap', 0.90, 0.74, 'r', 'Skill 3');
+        add('tap', 0.82, 0.84, 'space', 'Attack');
+      } else if (name==='racing'){
+        add('tap', 0.12, 0.78, 'a', 'Left');
+        add('tap', 0.28, 0.78, 'd', 'Right');
+        add('tap', 0.82, 0.70, 'w', 'Accelerate');
+        add('tap', 0.82, 0.86, 's', 'Brake');
+      } else { return; }
+      importedHudTargets = targets;
+      importedTapBindings = [];
+      syncTapBindingsFromTargets();
+      selectedHudTarget = -1;
+      inspectorKeyCapture = false;
+      saveImportedBindings();
+      renderHudTargets();
+      try { syncMouseSettingsUi(); } catch(e){}
+      try { uiSyncMode(); } catch(e){}
+      setTapStatus((name==='shooter'?'Shooter (FPS)':name==='moba'?'MOBA':'Racing') + ' preset added. You can move controls and change keys.', false);
+      try { setLayoutStatus('Preset applied. Click a control and press a key to change it.'); } catch(e){}
+    }
+    var ps=document.getElementById('preset-shooter'); if(ps) ps.addEventListener('click', function(){ applyPreset('shooter'); });
+    var pm=document.getElementById('preset-moba'); if(pm) pm.addEventListener('click', function(){ applyPreset('moba'); });
+    var pr=document.getElementById('preset-racing'); if(pr) pr.addEventListener('click', function(){ applyPreset('racing'); });
+  })();
+
   tick();
   setInterval(tick, 250);
   fitStage();
@@ -2434,3 +2602,4 @@ function escapeHtml(value) {
     }
   });
 }
+
