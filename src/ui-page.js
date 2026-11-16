@@ -153,6 +153,8 @@ export function renderPage(options) {
   .km-hint { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
   #stage.layout-editing { cursor: crosshair; }
   #stage.placing-control { cursor: copy; }
+  .tap-ripple { position:absolute; width:34px; height:34px; margin:-17px 0 0 -17px; border:2px solid rgba(131,255,201,.95); border-radius:50%; background:rgba(131,255,201,.18); pointer-events:none; z-index:12; transform:scale(.3); opacity:1; animation:tap-ripple .45s ease-out forwards; box-shadow:0 0 0 2px rgba(0,0,0,.2) inset; }
+  @keyframes tap-ripple { to { transform:scale(1.8); opacity:0; } }
   .hud-target { cursor: grab; }
   .kv { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 3px 0; }
   .kv b { color: var(--text); font-weight: 650; }
@@ -993,62 +995,122 @@ export function renderPage(options) {
     syncMouseSettingsUi();
   }
 
-  // Single stage pointer handler: place > marker select/move > layout edit click > passthrough touch
+  // Single stage pointer handler: (a) place armed control, (b) marker edit in layout mode, (c) layout miss deselect, (d) tap
+  var tapDrag = null; // { pointerId, downPoint, moved }
   stage.addEventListener('pointerdown', function (evt) {
-    if (placingNewControl) {
+    try {
+      // (a) armed placement
+      if (placingNewControl) {
+        evt.preventDefault();
+        evt.stopImmediatePropagation();
+        var pType = pendingControlType || 'tap';
+        var position = toDevice(evt);
+        placeControlAt(position.x / Math.max(1, W), position.y / Math.max(1, H), pType);
+        try { setTapStatus('Placed ' + kmTypeLabel(pType) + ' — press a key to assign it. No tap sent.'); } catch (e) {}
+        return;
+      }
+      // (b) marker select/move only in Edit layout mode
+      var targetNode = evt.target.closest && evt.target.closest('.hud-target');
+      if (targetNode && layoutEditMode) {
+        evt.preventDefault();
+        evt.stopImmediatePropagation();
+        selectedHudTarget = Number(targetNode.dataset.targetIndex);
+        var startPoint = toDevice(evt);
+        movingHudTarget = { pointerId: evt.pointerId, index: selectedHudTarget, startX: startPoint.x, startY: startPoint.y, moved: false };
+        try { stage.setPointerCapture(evt.pointerId); } catch (e) {}
+        renderHudTargets();
+        try { setLayoutStatus('Selected ' + ((importedHudTargets[selectedHudTarget] || {}).actionLabel || 'control') + ' — drag to move or press a key to assign.'); } catch (e) {}
+        return;
+      }
+      // (c) edit mode miss: deselect and fall through to tap (do not swallow)
+      if (layoutEditMode && !targetNode) {
+        if (selectedHudTarget !== -1) {
+          selectedHudTarget = -1;
+          try { renderHudTargets(); } catch (e) {}
+        }
+        try { setLayoutStatus('Edit layout: no marker selected — sending tap.'); } catch (e) {}
+        // fall through to (d)
+      }
+
+      // (d) ALWAYS send tap at clicked device coordinates
+      // Explicit mapping+pointer-lock behavior: left click fires at fixed fire point (not clicked point)
+      var point = toDevice(evt);
+      try { console.log('[tap] stage pointerdown', { clientX: evt.clientX, clientY: evt.clientY, deviceX: point.x, deviceY: point.y, devW: point.devW, devH: point.devH, mappingActive: mappingActive, pointerLocked: document.pointerLockElement === stage, placingNewControl: !!placingNewControl, layoutEditMode: !!layoutEditMode }); } catch (e) {}
+
+      if (mappingActive && document.pointerLockElement === stage && evt.button === 0) {
+        // fire handled by document mousedown/button-down path -> fixed fire point; make explicit
+        evt.preventDefault();
+        try {
+          var st = (typeof mapSettings === 'function') ? mapSettings() : null;
+          var fx = st ? (st.shootX != null ? st.shootX : (st.fireX != null ? st.fireX : 0.7526)) : 0.7526;
+          var fy = st ? (st.shootY != null ? st.shootY : (st.fireY != null ? st.fireY : 0.7281)) : 0.7281;
+          setTapStatus('Mapping ON + mouse captured: left click fires at fixed fire point ' + (Number(fx)*100).toFixed(2) + '%, ' + (Number(fy)*100).toFixed(2) + '% (not at clicked point). Click screen with mapping off to tap anywhere.', false);
+        } catch (e) {
+          try { setTapStatus('Mapping ON + mouse captured: left click fires at fixed fire point (not at clicked point).', false); } catch (e2) {}
+        }
+        return;
+      }
+
       evt.preventDefault();
       evt.stopImmediatePropagation();
-      var position = toDevice(evt);
-      placeControlAt(position.x / W, position.y / H, pendingControlType);
-      return;
-    }
-    var targetNode = evt.target.closest && evt.target.closest('.hud-target');
-    if (targetNode) {
-      evt.preventDefault();
-      evt.stopImmediatePropagation();
-      selectedHudTarget = Number(targetNode.dataset.targetIndex);
-      if (!layoutEditMode) layoutEditMode = true;
-      var startPoint = toDevice(evt);
-      movingHudTarget = { pointerId: evt.pointerId, index: selectedHudTarget, startX: startPoint.x, startY: startPoint.y, moved: false };
+      // cancel any in-flight tap drag
+      if (tapDrag) {
+        try { api('/api/input', { op: 'up', name: 'A', x: tapDrag.downPoint.x, y: tapDrag.downPoint.y }).catch(function(){}); } catch (e) {}
+        tapDrag = null;
+      }
+      tapDrag = { pointerId: evt.pointerId, downPoint: point, moved: false };
+      dragging = true;
       try { stage.setPointerCapture(evt.pointerId); } catch (e) {}
-      renderHudTargets();
-      setLayoutStatus('Selected ' + ((importedHudTargets[selectedHudTarget] || {}).actionLabel || 'control') + ' � drag to move or press a key to assign.');
-      return;
+      lastTapInfo = { x: point.x, y: point.y, px: pct2(point.x, point.devW || W), py: pct2(point.y, point.devH || H) };
+      showTapRipple(point);
+      setTapStatus('Tapping at ' + lastTapInfo.px + '%, ' + lastTapInfo.py + '% (device ' + point.x + ',' + point.y + ')…');
+      try { console.log('[tap] down request', { op: 'down', name: 'A', x: point.x, y: point.y }); } catch (e) {}
+      api('/api/input', { op: 'down', name: 'A', x: point.x, y: point.y })
+        .then(function (res) {
+          try {
+            var msgCount = res && (res.totalMessages != null ? res.totalMessages : (res.pointers && res.pointers.totalMessages != null ? res.pointers.totalMessages : null));
+            var suffix = (msgCount != null ? (' — messages sent: ' + msgCount) : '');
+            setTapStatus('Tapped at ' + lastTapInfo.px + '%, ' + lastTapInfo.py + '%' + suffix);
+          } catch (e) {}
+          try { console.log('[tap] down ok', res); } catch (e) {}
+        })
+        .catch(function (err) {
+          var em = (err && err.message) ? err.message : String(err);
+          setTapStatus('Tap failed (down): ' + em, true);
+          try { console.error('[tap] down failed', err); } catch (e) {}
+          try { report(err); } catch (e) {}
+        });
+    } catch (e) {
+      try { setTapStatus('Tap handler error: ' + (e && e.message ? e.message : e), true); } catch (e2) {}
+      try { console.error('[tap] pointerdown error', e); } catch (e2) {}
     }
-    if (layoutEditMode) {
-      evt.preventDefault();
-      evt.stopImmediatePropagation();
-      selectedHudTarget = -1;
-      renderHudTargets();
-      return;
-    }
-    if (mappingActive) {
-      // mapping mode: no direct pointer A passthrough here
-      return;
-    }
-    evt.preventDefault();
-    evt.stopImmediatePropagation();
-    var point = toDevice(evt);
-    dragging = true;
-    try { stage.setPointerCapture(evt.pointerId); } catch (e) {}
-    api('/api/input', { op: 'down', name: 'A', x: point.x, y: point.y }).catch(report);
   }, true);
 
   stage.addEventListener('pointermove', function (evt) {
-    if (movingHudTarget && movingHudTarget.pointerId === evt.pointerId) {
-      evt.preventDefault();
-      evt.stopImmediatePropagation();
-      var point = toDevice(evt);
-      var dx = Math.abs(point.x - (movingHudTarget.startX || 0));
-      var dy = Math.abs(point.y - (movingHudTarget.startY || 0));
-      if (dx + dy > 3) movingHudTarget.moved = true;
-      var target = importedHudTargets[movingHudTarget.index];
-      if (target) updateHudTargetPosition(target, point.x / W, point.y / H);
-      return;
-    }
-    if (!dragging) { return; }
-    pendingMove = toDevice(evt);
-    flushMove();
+    try {
+      if (movingHudTarget && movingHudTarget.pointerId === evt.pointerId) {
+        evt.preventDefault();
+        evt.stopImmediatePropagation();
+        var point = toDevice(evt);
+        var dx = Math.abs(point.x - (movingHudTarget.startX || 0));
+        var dy = Math.abs(point.y - (movingHudTarget.startY || 0));
+        if (dx + dy > 3) movingHudTarget.moved = true;
+        var target = importedHudTargets[movingHudTarget.index];
+        if (target) updateHudTargetPosition(target, point.x / Math.max(1,W), point.y / Math.max(1,H));
+        return;
+      }
+      if (tapDrag && tapDrag.pointerId === evt.pointerId) {
+        evt.preventDefault();
+        var mpt = toDevice(evt);
+        tapDrag.downPoint = mpt; // track last position for up
+        pendingMove = mpt;
+        flushMove();
+        return;
+      }
+      if (!dragging) { return; }
+      pendingMove = toDevice(evt);
+      flushMove();
+    } catch (e) { try { console.error('[tap] pointermove error', e); } catch (e2) {} }
   }, true);
 
   function flushMove() {
@@ -1057,36 +1119,52 @@ export function renderPage(options) {
     pendingMove = null;
     moveInFlight = true;
     api('/api/input', { op: 'move', name: 'A', x: point.x, y: point.y })
-      .catch(report)
+      .catch(function (err) { try { console.error('[tap] move failed', err); } catch (e) {} try { report(err); } catch (e) {} })
       .then(function () { moveInFlight = false; flushMove(); });
   }
 
-  function stopDrag(evt) {
-    if (!dragging) { return; }
-    dragging = false;
-    if (evt && evt.clientX !== undefined) { pendingMove = toDevice(evt); }
-    var point = pendingMove || { x: 0, y: 0 };
-    pendingMove = null;
-    api('/api/input', { op: 'up', name: 'A', x: point.x, y: point.y }).catch(report);
+  function stopTapDrag(evt) {
+    if (!tapDrag) { if (dragging) dragging = false; return; }
+    if (evt && evt.pointerId != null && evt.pointerId !== tapDrag.pointerId) return;
+    try {
+      var point = (evt && evt.clientX !== undefined) ? toDevice(evt) : (tapDrag.downPoint || { x: 0, y: 0 });
+      tapDrag = null;
+      dragging = false;
+      pendingMove = null;
+      api('/api/input', { op: 'up', name: 'A', x: point.x, y: point.y })
+        .then(function (res) {
+          try { console.log('[tap] up ok', res, point); } catch (e) {}
+        })
+        .catch(function (err) {
+          var em = (err && err.message) ? err.message : String(err);
+          setTapStatus('Tap failed (up): ' + em, true);
+          try { console.error('[tap] up failed', err); } catch (e) {}
+          try { report(err); } catch (e) {}
+        });
+    } catch (e) {
+      tapDrag = null; dragging = false;
+      try { setTapStatus('Tap release error: ' + (e && e.message ? e.message : e), true); } catch (e2) {}
+    }
   }
 
   function finishHudDrag(evt) {
     if (!movingHudTarget || (evt && evt.pointerId !== movingHudTarget.pointerId)) return;
     if (evt) { evt.preventDefault(); evt.stopImmediatePropagation(); }
     movingHudTarget = null;
-    saveImportedBindings();
-    renderHudTargets();
-    syncMouseSettingsUi();
-    scheduleMappingUpdate('control position');
+    try { saveImportedBindings(); } catch (e) {}
+    try { renderHudTargets(); } catch (e) {}
+    try { syncMouseSettingsUi(); } catch (e) {}
+    try { scheduleMappingUpdate('control position'); } catch (e) {}
   }
   stage.addEventListener('pointerup', function (evt) {
     if (movingHudTarget && movingHudTarget.pointerId === evt.pointerId) { finishHudDrag(evt); return; }
-    stopDrag(evt);
+    stopTapDrag(evt);
   }, true);
   stage.addEventListener('pointercancel', function (evt) {
     if (movingHudTarget && movingHudTarget.pointerId === evt.pointerId) { finishHudDrag(evt); return; }
-    stopDrag(evt);
+    stopTapDrag(evt);
   }, true);
+
   window.addEventListener('blur', function () {
     if (dragging) { stopDrag(); }
     if (mappingActive) { stopMapping(); }
@@ -1929,18 +2007,37 @@ export function renderPage(options) {
     }
   });
   document.addEventListener('mousedown', function (evt) {
-    if (!mappingActive) { return; }
-    if (evt.button === 0 || evt.button === 2) {
-      evt.preventDefault();
-      queuedApi({ op: 'button-down', button: evt.button === 0 ? 'left' : 'right' });
-    }
+    try {
+      if (!mappingActive) { return; }
+      // In mapping mode with pointer lock (aim/camera captured), left/right are mapped fire/scope actions at fixed points.
+      // Without pointer lock, allow normal screen clicks to be handled as direct taps by stage handler.
+      if (document.pointerLockElement !== stage) { return; }
+      if (evt.button === 0 || evt.button === 2) {
+        evt.preventDefault();
+        queuedApi({ op: 'button-down', button: evt.button === 0 ? 'left' : 'right' }).then(function(){
+          if (evt.button === 0) {
+            try {
+              var st = (typeof mapSettings === 'function') ? mapSettings() : null;
+              var fx = st ? (st.shootX != null ? st.shootX : (st.fireX != null ? st.fireX : 0.7526)) : 0.7526;
+              var fy = st ? (st.shootY != null ? st.shootY : (st.fireY != null ? st.fireY : 0.7281)) : 0.7281;
+              setTapStatus('Fired at ' + (Number(fx)*100).toFixed(2) + '%, ' + (Number(fy)*100).toFixed(2) + '% (fixed fire point).');
+            } catch (e) {}
+          } else {
+            try { setTapStatus('Scope/right action sent (fixed mapping action).'); } catch (e) {}
+          }
+        }).catch(function(e){ try { setTapStatus('Mapped click failed: ' + (e && e.message ? e.message : e), true); } catch(e2){} try { report(e); } catch(e2){} });
+      }
+    } catch (e) { try { console.error('[mousedown mapping] error', e); } catch (e2) {} }
   });
   document.addEventListener('mouseup', function (evt) {
-    if (!mappingActive) { return; }
-    if (evt.button === 0 || evt.button === 2) {
-      evt.preventDefault();
-      queuedApi({ op: 'button-up', button: evt.button === 0 ? 'left' : 'right' });
-    }
+    try {
+      if (!mappingActive) { return; }
+      if (document.pointerLockElement !== stage) { return; }
+      if (evt.button === 0 || evt.button === 2) {
+        evt.preventDefault();
+        queuedApi({ op: 'button-up', button: evt.button === 0 ? 'left' : 'right' }).catch(function(e){ try { report(e); } catch(e2){} });
+      }
+    } catch (e) {}
   });
   document.addEventListener('contextmenu', function (evt) { if (mappingActive) { evt.preventDefault(); } });
 
@@ -1988,6 +2085,11 @@ export function renderPage(options) {
     fetch('/api/state', { headers: { 'x-heaven-token': TOKEN } })
       .then(function (res) { return res.json(); })
       .then(function (state) {
+        try {
+          var dw = state && state.device ? Number(state.device.width) : NaN;
+          var dh = state && state.device ? Number(state.device.height) : NaN;
+          if (dw > 0 && dh > 0 && (dw !== W || dh !== H)) setDisplaySize(dw, dh);
+        } catch (e) {}
         var pill = document.getElementById('session-pill');
         var mockLabel = state.mock ? ' (mock)' : '';
         if (state.session && state.session.running) {
